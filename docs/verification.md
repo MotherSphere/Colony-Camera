@@ -117,3 +117,33 @@ ZIP et PDB 0.1.1 copiés sur le Bureau dans `Mods créés/Colony Camera`, sans
 écraser le paquet 0.1. SHA256 ZIP :
 `07014b30f51e012a319167ae37aa4d3e17c64a07e787bd24c379c693dad44cb1`.
 Pas encore de journal issu d’un lancement en jeu de 0.1.1.
+
+## Correctif 0.1.2 — 17 septembre 2026
+
+Log utilisateur de 01:06–01:08 : chargement réussi, chaînage Begin vers TDM,
+End/Update vers SkyParkour, callback atteint, puis refus « Camera render node
+missing or root parented ». Aucun déplacement confirmé. Improved Camera chargé
+selon SKSE malgré notre faux négatif : fichier ImprovedCamera.dll.
+
+Investigation : GetRTTI de NiCamera dans la vtable AE 237191 pointe sur
+0x140EF1A50 ; l’instruction LEA renvoie bien 0x14331C690, soit l’adresse AE
+410506 attendue par netimmerse_cast. Ce contrôle exclut un mauvais identifiant
+CommonLib pour le type natif, sans prouver la structure de la scène de cette
+session. Aucun processus Skyrim n’était encore disponible pour lire la scène.
+
+Suppression du refus systématique d’un parent ; conversion monde→local via
+NiTransform::Invert, publication atomique si positions finies. Tests C++ :
+parent décalé (100,200,300), rotation de 90° et échelle 2, résultat local
+attendu (20,10,30) pour le monde (80,240,360), décalage enfant conservé,
+rejet d’échelle nulle sans écriture. Test introduit avant le support du parent
+(compilation refusée pour l’argument absent), puis exécuté sous Wine.
+La compilation et les six tests Rust, Clippy et formatage passent ; le
+chargement DLL et l’ABI sont contrôlés sous Wine. Validation en jeu restante.
+
+Si NiCamera reste absente, le nouveau journal donne le parent, le nombre de
+slots enfants et leurs types. Ne pas présenter l’hypothèse du parent comme
+un fait mesuré dans la session 0.1.1 : son journal regroupait les deux causes.
+
+Relecture indépendante : aucun défaut bloquant trouvé. Le complément conseillé
+a été ajouté : parent avec translation NaN, rejet après calcul, comparaison
+des douze composantes avant/après pour exclure une écriture partielle.

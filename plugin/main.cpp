@@ -125,16 +125,23 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         state = {}; return;
     }
     auto* root = camera->cameraRoot.get();
-    // A parented root belongs to a different camera rig; do not reinterpret its local coordinates.
     RE::NiCamera* rendered = nullptr;
-    if (root && !root->parent) {
+    if (root) {
         for (const auto& child : root->GetChildren()) {
             if (child && (rendered = netimmerse_cast<RE::NiCamera*>(child.get()))) break;
         }
     }
     if (!rendered) {
         static bool warned = false;
-        if (!warned) { spdlog::warn("Camera render node missing or root parented; retaining native camera"); warned = true; }
+        if (!warned) {
+            spdlog::warn("NiCamera missing: root={} parent={} child_slots={}",
+                static_cast<const void*>(root), static_cast<const void*>(root ? root->parent : nullptr),
+                root ? root->GetChildren().capacity() : 0);
+            if (root) for (const auto& child : root->GetChildren()) {
+                if (child) spdlog::warn("Camera child type={}", child->GetRTTI() ? child->GetRTTI()->GetName() : "no RTTI");
+            }
+            warned = true;
+        }
         state = {}; return;
     }
     const auto native = self->translation;
@@ -152,9 +159,13 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         state = {}; return;
     }
     candidate.position[0] = position.x; candidate.position[1] = position.y; candidate.position[2] = position.z;
+    if (!scene::PublishPosition(self->translation, root->local.translate, root->world.translate,
+            rendered->world.translate, position, root->parent ? &root->parent->world : nullptr)) {
+        static bool warned = false;
+        if (!warned) { spdlog::warn("Invalid camera parent transform or position; retaining native camera"); warned = true; }
+        state = {}; return;
+    }
     state = candidate;
-    scene::PublishPosition(self->translation, root->local.translate, root->world.translate,
-        rendered->world.translate, position);
     // Refresh the actual render camera's projection after changing its world position.
     static REL::Relocation<void (*)(RE::NiCamera*)> updateMatrix{RELOCATION_ID(69271, 70641)};
     updateMatrix(rendered);
@@ -165,6 +176,9 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         reportedMovement = true;
     }
     if (!reportedFrame) {
+        spdlog::info("Camera scene: parent={} local=({},{},{}) world=({},{},{})",
+            static_cast<const void*>(root->parent), root->local.translate.x, root->local.translate.y,
+            root->local.translate.z, root->world.translate.x, root->world.translate.y, root->world.translate.z);
         spdlog::info("Camera frame applied; native=({},{},{}) output=({},{},{}) half_life={} max_lag={}",
             native.x, native.y, native.z, position.x, position.y, position.z, profile.half_life, profile.max_lag);
         reportedFrame = true;
@@ -224,7 +238,7 @@ void InstallHooks() {
     originalEnd = vtable.write_vfunc(2, End);
     originalUpdate = vtable.write_vfunc(3, Update);
     hooksInstalled = true;
-    spdlog::info("Camera hooks installed after game load; ImprovedCameraSE={}", GetModuleHandleW(L"ImprovedCameraSE.dll") != nullptr);
+    spdlog::info("Camera hooks installed after game load; ImprovedCameraSE={}", (GetModuleHandleW(L"ImprovedCamera.dll") != nullptr || GetModuleHandleW(L"ImprovedCameraSE.dll") != nullptr));
 }
 void Message(SKSE::MessagingInterface::Message* message) {
     if (message->type == SKSE::MessagingInterface::kPostLoadGame || message->type == SKSE::MessagingInterface::kNewGame) InstallHooks();
@@ -246,7 +260,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,1,1,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,1,2,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -260,7 +274,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>((*directory / "ColonyCamera.log").string(), true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Colony Camera 0.1.1 alpha; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Colony Camera 0.1.2 alpha; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

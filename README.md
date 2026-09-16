@@ -1,7 +1,7 @@
 # Colony Camera
 
 Mod de caméra indépendant pour Skyrim, écrit en Rust avec une passerelle C++
-CommonLibSSE-NG. **Version 0.1.1 alpha : correction de l’intégration caméra, validation en jeu requise.** Ce n'est pas une version de SmoothCam ni une copie de son code.
+CommonLibSSE-NG. **Version 0.1.2 alpha : correction de l’intégration caméra, validation en jeu requise.** Ce n'est pas une version de SmoothCam ni une copie de son code.
 
 ## Fonctionnalités de cette alpha
 
@@ -31,7 +31,7 @@ Papyrus nécessaire. Compilation Windows x64 ; chargement initial observé sous 
 1. Sauvegarder sa configuration, fermer Skyrim et désactiver SmoothCam ainsi que
    les autres remplaçants complets de la caméra à la troisième personne. Improved Camera
    peut rester activé pour cet essai : son interception des collisions est conservée.
-2. Installer le dossier `Colony Camera 0.1.1 alpha` dans un gestionnaire de mods.
+2. Installer le dossier `Colony Camera 0.1.2 alpha` dans un gestionnaire de mods.
    Il doit contenir `SKSE/Plugins/ColonyCamera.dll` et `ColonyCamera.ini`.
 3. Lancer Skyrim via SKSE et tester sur une sauvegarde de test.
 4. Consulter `Documents/My Games/Skyrim Special Edition/SKSE/ColonyCamera.log`
@@ -129,3 +129,18 @@ Le fonctionnement de raccordement a été étudié dans les sources publiques de
 [SmoothCam](https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f3960ec4de2b28af5e863c794a3924e6a2dfdd),
 notamment le chargement différé et la publication vers NiCamera. Aucun fichier
 SmoothCam n’est embarqué ; la passerelle CommonLib est implémentée dans ce projet.
+
+## Correctif 0.1.2
+
+L’essai de 0.1.1 a confirmé l’appel du callback après TDM/SkyParkour, mais le
+traitement restait bloqué par un diagnostic ambigu : NiCamera absente ou racine
+attachée à un parent. La présence d’un parent n’est plus un motif de refus : la
+position locale est obtenue par la transformation inverse CommonLib du parent,
+tandis que les positions monde et le décalage propre au nœud de rendu sont préservés.
+Une transformation invalide laisse les positions intactes.
+
+Les diagnostics distinguent maintenant racine absente, type des enfants,
+transformation invalide et application réussie. La détection d’Improved Camera
+reconnaît aussi son vrai nom de fichier `ImprovedCamera.dll`.
+Le jeu doit être relancé pour charger cette DLL ; la levée du blocage observé
+reste à confirmer avec le nouveau journal.

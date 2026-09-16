@@ -30,5 +30,9 @@ L’installation attend NewGame/PostLoadGame et sauvegarde les entrées existant
 même si elles appartiennent à un autre plugin. Les gardes de préfixe restent un
 contrôle hors ligne de la version, pas un refus des detours compatibles en mémoire.
 Après le filtre Rust et la collision, mise à jour de ThirdPersonState, de la racine
-sans parent et de NiCamera, puis de sa matrice monde-écran. Les rares diagnostics
+et de NiCamera, puis de sa matrice monde-écran. Les rares diagnostics
 sont limités au premier callback, premier résultat et premier déplacement par reset.
+
+En 0.1.2, un parent est accepté : transformation inverse de sa matrice monde
+pour calculer la translation locale de la racine. Le calcul précède toute
+écriture, avec refus des positions non finies et d’une échelle parent nulle.

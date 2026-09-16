@@ -2,8 +2,10 @@
 #include "../plugin/runtime.h"
 #include "../plugin/scene.h"
 #include <cassert>
+#include <RE/N/NiTransform.h>
 #include <cmath>
 #include <cstring>
+#include <limits>
 int main() {
     // Regression: writing only ThirdPersonState leaves the rendered camera unmoved.
     RE::NiPoint3 statePos{10,20,30}, local{10,20,30}, world{10,20,30}, rendered{11,22,33};
@@ -12,6 +14,28 @@ int main() {
     assert(rendered.x == 41 && rendered.y == 52 && rendered.z == 63);
     scene::PublishPosition(statePos, local, world, rendered, {40,50,60});
     assert(rendered.x == 41 && rendered.y == 52 && rendered.z == 63);
+
+    // A camera root may be attached to a translated, rotated and scaled scene parent.
+    RE::NiTransform parent;
+    parent.translate = {100,200,300};
+    parent.scale = 2;
+    parent.rotate.entry[0][0] = 0; parent.rotate.entry[0][1] = -1;
+    parent.rotate.entry[1][0] = 1; parent.rotate.entry[1][1] = 0;
+    assert(scene::PublishPosition(statePos, local, world, rendered, {80,240,360}, &parent));
+    assert(local.x == 20 && local.y == 10 && local.z == 30);
+    assert(statePos.x == 80 && world.y == 240 && rendered.z == 363);
+    const auto saved = local;
+    parent.scale = 0;
+    assert(!scene::PublishPosition(statePos, local, world, rendered, {0,0,0}, &parent));
+    assert(local.x == saved.x && world.y == 240 && statePos.x == 80 && rendered.z == 363);
+
+    // Late validation failure must not partially move any scene position.
+    const RE::NiPoint3 before[]{statePos, local, world, rendered};
+    parent.scale = 2;
+    parent.translate.x = std::numeric_limits<float>::quiet_NaN();
+    assert(!scene::PublishPosition(statePos, local, world, rendered, {0,0,0}, &parent));
+    const RE::NiPoint3 after[]{statePos, local, world, rendered};
+    assert(std::memcmp(before, after, sizeof(before)) == 0);
 
     for (auto entry : {runtime::begin, runtime::end, runtime::update, runtime::collision, runtime::matrix}) {
         auto bytes = entry.prefix;
