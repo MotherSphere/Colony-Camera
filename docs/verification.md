@@ -1,4 +1,6 @@
-# Vérification de Colony Camera 0.1 alpha
+# Vérification de Colony Camera
+
+## Historique : 0.1 alpha (avant essai utilisateur)
 
 Date : 17 septembre 2026. Pas de test en jeu effectué. Installation Eidos intacte.
 
@@ -74,3 +76,31 @@ ZIP et chaque fichier du manifeste SHA256 vérifiés après copie sur le Bureau.
 SHA256 ZIP : `b25f40179bbeec7a70b79ff998c3d065f2675f5452dadfc1260dcff5870a3940`.
 Le PDB correspondant est conservé à côté du ZIP, hors installation du mod.
 Aucune installation Eidos, publication distante ou upload Nexus réalisé.
+
+## Correctif 0.1.1 — 17 septembre 2026
+
+L’essai utilisateur de 0.1 a confirmé le chargement de la DLL, mais aucun effet
+visible : le journal bloquait le traitement lors des changements d’entrées.
+Improved Camera intercepte précisément l’entrée collision ; le refus persistait
+également sans ce mod. L’identité du second déclencheur n’est pas établie.
+Les anciennes affirmations de garde runtime ci-dessus décrivent 0.1, pas 0.1.1.
+
+Correction : installation sur PostLoadGame/NewGame, chaînage des slots présents,
+validation d’adresses exécutables sans exiger des octets vierges, publication dans
+les positions de la racine et du nœud NiCamera, recalcul de la matrice (AE 70641).
+Ce dernier point d’entrée a été lu dans l’exécutable réel et ajouté au vérificateur
+hors ligne, qui contrôle désormais cinq entrées. Les hooks collision d’Improved
+Camera restent traversés ; aucune interception n’est contournée par une adresse
+vanilla mémorisée avant son installation.
+
+Tests : les six tests Rust, Clippy, formatage, ABI C++ et chargement DLL sous Wine
+passent. Le test C++ de publication contrôle les quatre positions, préserve le
+décalage propre à l’enfant NiCamera et vérifie qu’une seconde publication identique
+ne cumule pas le déplacement. Son introduction a échoué avant implémentation
+(helper absent), puis passé après implémentation. Le démarrage de Skyrim, les
+collisions et les animations Improved Camera exigent toujours un test en jeu.
+
+La relecture du correctif a confirmé le chaînage, la signature et l’écriture de
+la collision, ainsi que la publication du rendu. Elle a identifié une exclusion
+de zoom trop large : les valeurs négatives restent valides en troisième personne.
+Ce seuil a été retiré ; aucune plage native de zoom n’est arbitrairement exclue.

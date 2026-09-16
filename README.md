@@ -1,8 +1,7 @@
 # Colony Camera
 
 Mod de caméra indépendant pour Skyrim, écrit en Rust avec une passerelle C++
-CommonLibSSE-NG. **Version 0.1 alpha : compilée et vérifiée hors jeu, pas encore
-validée en jeu.** Ce n'est pas une version de SmoothCam ni une copie de son code.
+CommonLibSSE-NG. **Version 0.1.1 alpha : correction de l’intégration caméra, validation en jeu requise.** Ce n'est pas une version de SmoothCam ni une copie de son code.
 
 ## Fonctionnalités de cette alpha
 
@@ -27,11 +26,12 @@ TDM, Improved Camera, systèmes de dialogue ou autres gestionnaires n'est revend
 
 Cible unique : **Skyrim Steam 1.7.104.0**, SKSE **2.3.1** et Address Library
 pour cette version. La DLL refuse les autres versions. Aucun ESP ni script
-Papyrus nécessaire. Compilation Windows x64 ; utilisation sous Proton à vérifier.
+Papyrus nécessaire. Compilation Windows x64 ; chargement initial observé sous Proton, rendu du correctif à vérifier.
 
 1. Sauvegarder sa configuration, fermer Skyrim et désactiver SmoothCam ainsi que
-   les autres mods contrôlant la caméra à la troisième personne.
-2. Installer le dossier `Colony Camera 0.1 alpha` dans un gestionnaire de mods.
+   les autres remplaçants complets de la caméra à la troisième personne. Improved Camera
+   peut rester activé pour cet essai : son interception des collisions est conservée.
+2. Installer le dossier `Colony Camera 0.1.1 alpha` dans un gestionnaire de mods.
    Il doit contenir `SKSE/Plugins/ColonyCamera.dll` et `ColonyCamera.ini`.
 3. Lancer Skyrim via SKSE et tester sur une sauvegarde de test.
 4. Consulter `Documents/My Games/Skyrim Special Edition/SKSE/ColonyCamera.log`
@@ -110,3 +110,22 @@ DirectXTK de Microsoft : versions et notices dans `dependencies.json` et
 La lecture de déclarations CommonLib et des points d'entrée de Skyrim permet
 l'intégration au moteur ; elle n'établit pas une validation en jeu ni une promesse
 de publication sur une plateforme. Voir `docs/verification.md` pour les limites.
+
+## Correctif 0.1.1
+
+L’alpha 0.1 bloquait son traitement dès qu’une autre extension interceptait les
+fonctions de caméra. Les hooks sont désormais posés après chargement d’une partie
+ou démarrage d’une nouvelle partie, en conservant les callbacks déjà présents.
+La position est publiée dans l’état de caméra, sa racine et le nœud de rendu ;
+la matrice de projection est ensuite recalculée par le moteur.
+
+Le journal distingue l’installation, l’appel effectif du callback, l’application
+d’une image et le premier déplacement non nul. Ces traces ne sont pas écrites
+à chaque image. Les animations sans contrôle et les killmoves
+restent natifs pour limiter les interférences avec Improved Camera.
+Ce n’est pas une validation de toutes ses animations ou de tous les mods de caméra.
+
+Le fonctionnement de raccordement a été étudié dans les sources publiques de
+[SmoothCam](https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f3960ec4de2b28af5e863c794a3924e6a2dfdd),
+notamment le chargement différé et la publication vers NiCamera. Aucun fichier
+SmoothCam n’est embarqué ; la passerelle CommonLib est implémentée dans ce projet.

@@ -6,6 +6,8 @@
 #include <fstream>
 #include "core.h"
 #include "runtime.h"
+#include "scene.h"
+#include <Windows.h>
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -15,7 +17,9 @@ std::atomic_uint commands{0};
 std::atomic_uint bindings[3]{66, 67, 68};
 std::atomic_bool resetRequested{true};
 bool leftShoulder = false;
-std::atomic_bool conflict{false};
+bool hooksInstalled = false;
+bool reportedFrame = false;
+bool reportedMovement = false;
 RE::ThirdPersonState* appliedTo = nullptr;
 RE::TESObjectCELL* lastCell = nullptr;
 Clock::time_point lastTick{};
@@ -75,19 +79,24 @@ void Begin(RE::ThirdPersonState* self) {
 }
 
 void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>& next) {
+    static bool entered = false;
+    if (!entered) { spdlog::info("Third-person Update callback reached"); entered = true; }
     // Feed the native solver its own previous result, not our filtered output.
     // Restore only an output that is still ours; never overwrite an engine/load change.
     RestoreNative(self);
-    if (resetRequested.load()) state = {};
+    if (resetRequested.load()) { state = {}; reportedFrame = false; reportedMovement = false; }
     const auto pending = commands.exchange(0);
     if (pending & 4) LoadConfig();
     if (pending & 1) { config.enabled = !config.enabled; resetRequested = true; spdlog::info("Enabled={}", config.enabled); }
-    if (pending & 2) { leftShoulder = !leftShoulder; }
+    if (pending & 2) { leftShoulder = !leftShoulder; spdlog::info("Left shoulder={}", leftShoulder); }
     auto* camera = RE::PlayerCamera::GetSingleton();
     auto* player = RE::PlayerCharacter::GetSingleton();
     auto* ui = RE::UI::GetSingleton();
-    const bool eligible = config.enabled && !conflict.load() && self->id == RE::CameraState::kThirdPerson && camera && player && ui && self->camera == camera
+    const bool eligible = config.enabled && self->id == RE::CameraState::kThirdPerson && camera && player && ui && self->camera == camera
         && camera->currentState.get() == self && camera->cameraTarget.get().get() == player
+        && self->IsInputEventHandlingEnabled()
+        && !player->IsInKillMove() && RE::ControlMap::GetSingleton()
+        && RE::ControlMap::GetSingleton()->IsMovementControlsEnabled()
         && !ui->GameIsPaused() && !ui->IsMenuOpen("Dialogue Menu") && !ui->IsMenuOpen("Loading Menu")
         && !ui->IsMenuOpen("Console");
     const bool aim = eligible && NativeAim(player, camera);
@@ -115,6 +124,19 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         // Default aiming really is native: not even an extra collision query.
         state = {}; return;
     }
+    auto* root = camera->cameraRoot.get();
+    // A parented root belongs to a different camera rig; do not reinterpret its local coordinates.
+    RE::NiCamera* rendered = nullptr;
+    if (root && !root->parent) {
+        for (const auto& child : root->GetChildren()) {
+            if (child && (rendered = netimmerse_cast<RE::NiCamera*>(child.get()))) break;
+        }
+    }
+    if (!rendered) {
+        static bool warned = false;
+        if (!warned) { spdlog::warn("Camera render node missing or root parented; retaining native camera"); warned = true; }
+        state = {}; return;
+    }
     const auto native = self->translation;
     if (!std::isfinite(native.x) || !std::isfinite(native.y) || !std::isfinite(native.z)) {
         state = {}; return;
@@ -131,8 +153,22 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     }
     candidate.position[0] = position.x; candidate.position[1] = position.y; candidate.position[2] = position.z;
     state = candidate;
-    self->translation = position;
+    scene::PublishPosition(self->translation, root->local.translate, root->world.translate,
+        rendered->world.translate, position);
+    // Refresh the actual render camera's projection after changing its world position.
+    static REL::Relocation<void (*)(RE::NiCamera*)> updateMatrix{RELOCATION_ID(69271, 70641)};
+    updateMatrix(rendered);
     appliedTo = self;
+    const float dx = position.x-native.x, dy = position.y-native.y, dz = position.z-native.z;
+    if (!reportedMovement && dx*dx+dy*dy+dz*dz > 0.01f) {
+        spdlog::info("Visible camera displacement applied: ({},{},{})", dx, dy, dz);
+        reportedMovement = true;
+    }
+    if (!reportedFrame) {
+        spdlog::info("Camera frame applied; native=({},{},{}) output=({},{},{}) half_life={} max_lag={}",
+            native.x, native.y, native.z, position.x, position.y, position.z, profile.half_life, profile.max_lag);
+        reportedFrame = true;
+    }
 }
 
 class Input final : public RE::BSTEventSink<RE::InputEvent*> {
@@ -156,22 +192,42 @@ public:
 };
 Input input;
 
-void CheckOwnership() {
-    REL::Relocation<std::uintptr_t> vtable{RE::VTABLE_ThirdPersonState[0]};
-    const auto* slots = reinterpret_cast<const std::uintptr_t*>(vtable.address());
-    const auto base = REL::Module::get().base();
-    bool changed = slots[1] != reinterpret_cast<std::uintptr_t>(Begin)
-        || slots[2] != reinterpret_cast<std::uintptr_t>(End)
-        || slots[3] != reinterpret_cast<std::uintptr_t>(Update);
-    for (const auto& entry : {runtime::begin, runtime::end, runtime::update, runtime::collision})
-        changed = changed || !entry.matches(reinterpret_cast<const void*>(base + entry.rva));
-    if (changed || REX::W32::GetModuleHandleW(L"SmoothCam.dll")) {
-        conflict = true;
-        spdlog::error("Another camera plugin or changed engine entry detected; Colony Camera stays inactive");
+bool Executable(std::uintptr_t address) {
+    MEMORY_BASIC_INFORMATION memory{};
+    if (!address || !VirtualQuery(reinterpret_cast<const void*>(address), &memory, sizeof(memory))) return false;
+    return memory.State == MEM_COMMIT && !(memory.Protect & (PAGE_GUARD | PAGE_NOACCESS))
+        && (memory.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY));
+}
+void LogEntry(const char* name, std::uintptr_t address) {
+    HMODULE module{};
+    char path[MAX_PATH]{};
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(address), &module)) GetModuleFileNameA(module, path, MAX_PATH);
+    spdlog::info("{} chain entry=0x{:x} module={}", name, address, path[0] ? path : "executable trampoline");
+}
+void InstallHooks() {
+    if (hooksInstalled) return;
+    if (GetModuleHandleW(L"SmoothCam.dll")) {
+        spdlog::error("SmoothCam.dll is loaded; disable SmoothCam before testing Colony Camera"); return;
     }
+    auto* camera = RE::PlayerCamera::GetSingleton();
+    auto* third = camera ? camera->cameraStates[RE::CameraState::kThirdPerson].get() : nullptr;
+    if (!third) { spdlog::error("Third-person camera state unavailable; hooks not installed"); return; }
+    REL::Relocation<std::uintptr_t> vtable{*reinterpret_cast<std::uintptr_t*>(third)};
+    const auto* slots = reinterpret_cast<const std::uintptr_t*>(vtable.address());
+    for (int i = 1; i <= 3; ++i) {
+        if (!Executable(slots[i])) { spdlog::error("Non-executable camera slot {}; hooks not installed", i); return; }
+    }
+    LogEntry("Begin", slots[1]); LogEntry("End", slots[2]); LogEntry("Update", slots[3]);
+    // Save the existing chain, including other SKSE plugins. Never replace it with a vanilla address.
+    originalBegin = vtable.write_vfunc(1, Begin);
+    originalEnd = vtable.write_vfunc(2, End);
+    originalUpdate = vtable.write_vfunc(3, Update);
+    hooksInstalled = true;
+    spdlog::info("Camera hooks installed after game load; ImprovedCameraSE={}", GetModuleHandleW(L"ImprovedCameraSE.dll") != nullptr);
 }
 void Message(SKSE::MessagingInterface::Message* message) {
-    if (message->type == SKSE::MessagingInterface::kPostPostLoad || message->type == SKSE::MessagingInterface::kDataLoaded) CheckOwnership();
+    if (message->type == SKSE::MessagingInterface::kPostLoadGame || message->type == SKSE::MessagingInterface::kNewGame) InstallHooks();
     if (message->type == SKSE::MessagingInterface::kDataLoaded) {
         auto* settings = RE::INISettingCollection::GetSingleton();
         if (settings) {
@@ -190,7 +246,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,1,0,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,1,1,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -204,27 +260,21 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>((*directory / "ColonyCamera.log").string(), true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Colony Camera 0.1 alpha; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Colony Camera 0.1.1 alpha; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
-        REL::Relocation<std::uintptr_t> vtable{RE::VTABLE_ThirdPersonState[0]};
-        const auto* slots = reinterpret_cast<const std::uintptr_t*>(vtable.address());
-        // Runtime-specific verified entry points. Refuse an occupied vtable instead of racing another camera mod.
         const auto base = REL::Module::get().base();
-        if (slots[1] != base + runtime::begin.rva || slots[2] != base + runtime::end.rva || slots[3] != base + runtime::update.rva) {
-            spdlog::error("ThirdPersonState::Update differs from verified 1.7.104 entry; no hooks installed"); return false;
-        }
-        for (const auto& entry : {runtime::begin, runtime::end, runtime::update, runtime::collision}) {
-            if (!entry.matches(reinterpret_cast<const void*>(base + entry.rva))) {
-                spdlog::error("{} entry bytes changed; no hooks installed", entry.name); return false;
-            }
-        }
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};
-        if (collisionAddress.address() != base + runtime::collision.rva) return false;
+        REL::Relocation<std::uintptr_t> matrixAddress{RELOCATION_ID(69271, 70641)};
+        if (collisionAddress.address() != base + runtime::collision.rva
+            || matrixAddress.address() != base + runtime::matrix.rva
+            || !Executable(collisionAddress.address()) || !Executable(matrixAddress.address())) {
+            spdlog::error("Unexpected runtime camera addresses; initialization refused"); return false;
+        }
+        // Entry detours are valid: Improved Camera hooks collision through MinHook.
+        // Offline verification checks the pristine executable; runtime calls retain these detours.
+        LogEntry("Collision", collisionAddress.address());
         if (!SKSE::GetMessagingInterface()->RegisterListener(Message)) return false;
-        originalBegin = vtable.write_vfunc(1, Begin);
-        originalEnd = vtable.write_vfunc(2, End);
-        originalUpdate = vtable.write_vfunc(3, Update);
-        spdlog::info("Native camera hooks installed; waiting for game data");
+        spdlog::info("Waiting for a saved or new game before installing camera hooks");
         return true;
     } catch (const std::exception& error) {
         spdlog::error("Initialization failed: {}", error.what()); return false;

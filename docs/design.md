@@ -22,4 +22,13 @@ Réticule personnalisé, trajectoire de projectiles et menu MCM constituent une
 
 Tests du moteur sur Linux, compilation DLL Windows, inspection des exports et
 vérification des points d'accroche dans l'exécutable réel. Un test en jeu reste
-obligatoire avant une diffusion stable. Aucun remplacement automatique du mod actif.
+obligatoire avant une diffusion stable. Les correctifs autorisés peuvent remplacer la DLL installée après sauvegarde, jeu fermé.
+
+### Intégration corrigée en 0.1.1
+
+L’installation attend NewGame/PostLoadGame et sauvegarde les entrées existantes,
+même si elles appartiennent à un autre plugin. Les gardes de préfixe restent un
+contrôle hors ligne de la version, pas un refus des detours compatibles en mémoire.
+Après le filtre Rust et la collision, mise à jour de ThirdPersonState, de la racine
+sans parent et de NiCamera, puis de sa matrice monde-écran. Les rares diagnostics
+sont limités au premier callback, premier résultat et premier déplacement par reset.

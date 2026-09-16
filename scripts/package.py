@@ -15,7 +15,7 @@ def git(*args, cwd=root):
 if git("status", "--porcelain").strip():
     raise SystemExit("Commit all source changes before packaging")
 subprocess.run(["python3", str(root / "scripts/fetch-dependencies.py")], check=True)
-stage = root / "dist" / "Colony Camera 0.1 alpha"
+stage = root / "dist" / "Colony Camera 0.1.1 alpha"
 if stage.exists():
     raise SystemExit(f"Output already exists: {stage}; preserve or rename it before repackaging")
 plugins = stage / "SKSE/Plugins"

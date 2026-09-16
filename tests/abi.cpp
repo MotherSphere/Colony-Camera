@@ -1,10 +1,19 @@
 #include "../plugin/core.h"
 #include "../plugin/runtime.h"
+#include "../plugin/scene.h"
 #include <cassert>
 #include <cmath>
 #include <cstring>
 int main() {
-    for (auto entry : {runtime::begin, runtime::end, runtime::update, runtime::collision}) {
+    // Regression: writing only ThirdPersonState leaves the rendered camera unmoved.
+    RE::NiPoint3 statePos{10,20,30}, local{10,20,30}, world{10,20,30}, rendered{11,22,33};
+    scene::PublishPosition(statePos, local, world, rendered, {40,50,60});
+    assert(statePos.x == 40 && local.y == 50 && world.z == 60);
+    assert(rendered.x == 41 && rendered.y == 52 && rendered.z == 63);
+    scene::PublishPosition(statePos, local, world, rendered, {40,50,60});
+    assert(rendered.x == 41 && rendered.y == 52 && rendered.z == 63);
+
+    for (auto entry : {runtime::begin, runtime::end, runtime::update, runtime::collision, runtime::matrix}) {
         auto bytes = entry.prefix;
         assert(entry.matches(bytes.data()));
         for (std::size_t i=0; i<bytes.size(); ++i) {

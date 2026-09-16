@@ -1,4 +1,4 @@
-"""Read-only validation of the exact runtime and four hooked/called entry points."""
+"""Read-only validation of the exact runtime and camera entry points."""
 import argparse
 import hashlib
 import json
@@ -32,7 +32,7 @@ def read(rva, size):
     raise ValueError(f"RVA outside mapped file: {rva:#x}")
 header = (Path(__file__).resolve().parents[1] / "plugin/runtime.h").read_text()
 entries = re.findall(r'Entry (\w+)\{"\w+", (0x[0-9A-F]+), \{([^}]+)\}', header)
-assert len(entries) == 4
+assert len(entries) == 5
 for name, rva_text, prefix_text in entries:
     rva = int(rva_text, 16)
     prefix = bytes(int(x, 16) for x in prefix_text.split(','))
@@ -41,7 +41,7 @@ for name, rva_text, prefix_text in entries:
         slot = {"begin": 1, "end": 2, "update": 3}[name]
         assert struct.unpack("<Q", read(addresses[205236]+8*slot, 8))[0] == base+rva
     else:
-        assert addresses[50832] == rva
+        assert addresses[50832 if name == "collision" else 70641] == rva
 print(json.dumps({"runtime":"1.7.104.0", "entries_verified": len(entries),
                   "exe_sha256": hashlib.sha256(data).hexdigest(),
                   "database_sha256": hashlib.sha256(db).hexdigest()}, indent=2))
