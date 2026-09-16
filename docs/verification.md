@@ -65,3 +65,12 @@ Conserver la DLL et son PDB correspondant lors de la collecte d'un crash log.
 Menu MCM, réticule et trajectoire propres, compatibilités inter-mods testées,
 prise en charge de plusieurs runtimes et presets avancés. Cette alpha n'est pas
 un remplacement complet de toutes les fonctions de SmoothCam.
+
+## Paquet livré
+
+Archive `Colony Camera 0.1 alpha.zip` produite depuis le commit `76389e0`,
+contenant la DLL, l'INI, les notices et les sources du projet et des dépendances.
+ZIP et chaque fichier du manifeste SHA256 vérifiés après copie sur le Bureau.
+SHA256 ZIP : `b25f40179bbeec7a70b79ff998c3d065f2675f5452dadfc1260dcff5870a3940`.
+Le PDB correspondant est conservé à côté du ZIP, hors installation du mod.
+Aucune installation Eidos, publication distante ou upload Nexus réalisé.

@@ -10,4 +10,4 @@
 - [x] Écrire plugin/main.cpp et plugin/core.h : ABI C, hooks Update/Begin/End chaînés, collision finale, profils, raccourcis, refus runtime inconnu.
 - [x] Construire avec CommonLibSSE-NG épinglé et dépendances sous leur licence ; CMake source + Cargo Windows.
 - [x] Vérifier ABI, exports PE, points d'accroche du SkyrimSE.exe local et packaging ; conserver les résultats dans docs/verification.md.
-- [ ] Committer chaque étape cohérente, préparer une archive alpha et documenter les tests en jeu restant à effectuer. Pas de push ni d'installation automatique.
+- [x] Committer chaque étape cohérente, préparer une archive alpha et documenter les tests en jeu restant à effectuer. Pas de push ni d'installation automatique.
