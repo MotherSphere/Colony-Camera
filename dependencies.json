@@ -1,0 +1,18 @@
+{
+  "commonlib": {
+    "url": "https://github.com/alandtse/CommonLibVR.git",
+    "revision": "c7662fc59e531f8c14d00665c5ad15a0577dc9b6"
+  },
+  "spdlog": {
+    "url": "https://github.com/gabime/spdlog.git",
+    "revision": "486b55554f11c9cccc913e11a87085b2a91f706f"
+  },
+  "directxmath": {
+    "url": "https://github.com/microsoft/DirectXMath.git",
+    "revision": "d837578297c6c93849573858182350ede04987dc"
+  },
+  "directxtk": {
+    "url": "https://github.com/microsoft/DirectXTK.git",
+    "revision": "642825891c41b1e7e4d6f934171f45b2645b713e"
+  }
+}

@@ -43,6 +43,7 @@ fn invalid_inputs_never_poison_state() {
     let p = Profile::default();
     let s = step(State::default(), frame(10.0, 0.01), p);
     assert_eq!(step(s, frame(f32::NAN, 0.01), p).position, s.position);
+    assert_eq!(step(s, frame(f32::NAN, 0.01), p).initialized, 0);
     assert_eq!(step(s, frame(20.0, f32::NAN), p).position, s.position);
     assert_eq!(step(s, frame(20.0, -1.0), p).position, s.position);
 }

@@ -8,6 +8,8 @@ fn rejects_unknown_duplicate_nonfinite_and_out_of_range_settings() {
         "[wrong]",
         "[combat]\nx=1\nx=2",
         "[general]\ntoggle_key=999",
+        "[general]\ntoggle_key=29",
+        "[general]\nshoulder_key=157",
         "[general]\nenabled=maybe",
         "[general]\ntoggle_key=120\nshoulder_key=120",
     ] {

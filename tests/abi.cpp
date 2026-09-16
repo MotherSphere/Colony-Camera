@@ -1,8 +1,18 @@
 #include "../plugin/core.h"
+#include "../plugin/runtime.h"
 #include <cassert>
 #include <cmath>
 #include <cstring>
 int main() {
+    for (auto entry : {runtime::begin, runtime::end, runtime::update, runtime::collision}) {
+        auto bytes = entry.prefix;
+        assert(entry.matches(bytes.data()));
+        for (std::size_t i=0; i<bytes.size(); ++i) {
+            bytes[i] ^= 0x80;
+            assert(!entry.matches(bytes.data()));
+            bytes[i] ^= 0x80;
+        }
+    }
     auto c = cc_defaults();
     assert(c.enabled == 1 && c.keys[0] == 0x42);
     CameraFrame f{{100,200,300},{1,0,0,0},0.016f,1};

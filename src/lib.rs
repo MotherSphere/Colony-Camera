@@ -76,6 +76,7 @@ pub fn step(mut state: State, frame: Frame, profile: Profile) -> State {
         || frame.dt < 0.0
         || !profile.valid()
     {
+        state.initialized = 0;
         return state;
     }
     let offset = rotate(frame.rotation, profile.offset);
@@ -175,8 +176,10 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
                     _ => return Err(format!("unknown key: {key}")),
                 };
                 let code: u32 = value.parse().map_err(|_| "key must be a scan code")?;
-                if !(1..=211).contains(&code) {
-                    return Err("key outside keyboard scan code range".into());
+                if !(1..=211).contains(&code) || [29, 157].contains(&code) {
+                    return Err(
+                        "key outside keyboard scan code range or reserved Ctrl modifier".into(),
+                    );
                 }
                 config.keys[idx] = code;
             }
