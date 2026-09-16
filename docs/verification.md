@@ -147,3 +147,10 @@ un fait mesuré dans la session 0.1.1 : son journal regroupait les deux causes.
 Relecture indépendante : aucun défaut bloquant trouvé. Le complément conseillé
 a été ajouté : parent avec translation NaN, rejet après calcul, comparaison
 des douze composantes avant/après pour exclure une écriture partielle.
+
+Livraison 0.1.2 depuis f3a1e9b : DLL remplacée dans le dossier Eidos existant,
+jeu fermé, INI inchangé ; sauvegarde `dist/backups/20260917-011459`.
+Reçu vérifié : `dist/installation-0.1.2.json`. ZIP/PDB sur le Bureau, versions
+précédentes conservées ; ZIP SHA256
+`3608ef9284a095ae50bb005854928e3faeb6a1468493e3d0d68137c030285405`.
+Aucun push, merge ou lancement de Skyrim. Nouveau test utilisateur requis.
