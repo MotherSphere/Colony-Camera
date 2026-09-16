@@ -104,3 +104,16 @@ La relecture du correctif a confirmé le chaînage, la signature et l’écritur
 la collision, ainsi que la publication du rendu. Elle a identifié une exclusion
 de zoom trop large : les valeurs négatives restent valides en troisième personne.
 Ce seuil a été retiré ; aucune plage native de zoom n’est arbitrairement exclue.
+
+### Livraison du correctif
+
+Commit du paquet : `e94c5d0`, branche locale `camera-initiale`, sans push ni merge.
+DLL 0.1.1 installée jeu fermé dans le dossier existant Eidos
+`Colony Camera 0.1 alpha/SKSE/Plugins`, INI conservé à l’identique.
+Sauvegarde DLL/INI/logs : `dist/backups/20260917-005754`.
+Improved Camera reste activé ; SmoothCam reste désactivé.
+SHA256 DLL installée : `2458f6c78d52c02e2645f0286736ff52e2ad63974a9fb6ed913c05395a691794`.
+ZIP et PDB 0.1.1 copiés sur le Bureau dans `Mods créés/Colony Camera`, sans
+écraser le paquet 0.1. SHA256 ZIP :
+`07014b30f51e012a319167ae37aa4d3e17c64a07e787bd24c379c693dad44cb1`.
+Pas encore de journal issu d’un lancement en jeu de 0.1.1.
