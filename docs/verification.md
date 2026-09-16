@@ -154,3 +154,23 @@ Reçu vérifié : `dist/installation-0.1.2.json`. ZIP/PDB sur le Bureau, version
 précédentes conservées ; ZIP SHA256
 `3608ef9284a095ae50bb005854928e3faeb6a1468493e3d0d68137c030285405`.
 Aucun push, merge ou lancement de Skyrim. Nouveau test utilisateur requis.
+
+## Diagnostic 0.1.3 — ralentissement rapporté
+
+0.1.2 : fonctionnement visuel confirmé par l’utilisateur et par le log de
+01:16:53 (parent présent, position appliquée), déplacement non nul à 01:16:56.
+Le blocage de scène est donc levé dans cette session. L’utilisateur rapporte
+ensuite une chute de 200 à 170 FPS en rotation/course, absente avec Ctrl+F8 off.
+Différence de temps par image correspondante : 5 ms contre 5,88 ms environ.
+
+Instrumentation échantillonnée de l’Update : temps total mesuré moins callback
+précédent, seconde collision, calcul Rust, publication/matrice. Bacs séparés
+activé/désactivé, bilan tous les 64 échantillons sur une image sur seize.
+Ce n’est pas une optimisation livrée ni une mesure des FPS/GPU. Les petits coûts
+avant la sonde et la sortie des journaux ne sont pas inclus dans `own`.
+
+Test C++ ajouté avant le helper : exclusion de la chaîne précédente, moyenne,
+compteur d’images appliquées, maximum et remise à zéro sur durées synthétiques.
+Compilation Windows, six tests Rust/Clippy/formatage et exécutables ABI/chargement
+sous Wine vérifiés. Aucun changement des positions, du lissage ou des collisions.
+Prochaine étape : lire les bilans PERF du test A/B avant de choisir une optimisation.

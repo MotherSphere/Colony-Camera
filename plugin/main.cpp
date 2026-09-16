@@ -7,6 +7,7 @@
 #include "core.h"
 #include "runtime.h"
 #include "scene.h"
+#include "timing.h"
 #include <Windows.h>
 
 namespace {
@@ -29,6 +30,37 @@ using BeginFn = void (*)(RE::ThirdPersonState*);
 REL::Relocation<UpdateFn> originalUpdate;
 REL::Relocation<BeginFn> originalBegin;
 REL::Relocation<BeginFn> originalEnd;
+
+timing::Totals timings[2];
+void ReportTiming(unsigned mode) {
+    auto& t = timings[mode];
+    if (!t.samples) return;
+    spdlog::info("PERF enabled={} samples={} applied={} mean_us: own={:.2f} previous_chain={:.2f} collision={:.2f} rust={:.2f} scene={:.2f} peak_own_us={:.2f}",
+        mode, t.samples, t.applied, t.own/t.samples, t.native/t.samples,
+        t.collision/t.samples, t.math/t.samples, t.scene/t.samples, t.peakOwn);
+    t = {};
+}
+struct Probe {
+    bool sampled;
+    unsigned mode;
+    Clock::time_point start;
+    timing::Sample result;
+    Probe(bool thirdPerson, bool enabled) : mode(enabled) {
+        static unsigned frame = 0;
+        sampled = thirdPerson && (++frame % 16 == 0);
+        start = Mark();
+    }
+    Clock::time_point Mark() const { return sampled ? Clock::now() : Clock::time_point{}; }
+    double Elapsed(Clock::time_point since) const {
+        return sampled ? std::chrono::duration<double, std::micro>(Clock::now()-since).count() : 0.0;
+    }
+    ~Probe() {
+        if (!sampled) return;
+        result.total = Elapsed(start);
+        timings[mode].Add(result);
+        if (timings[mode].samples >= 64) ReportTiming(mode);
+    }
+};
 
 void LoadConfig() {
     std::ifstream file("Data/SKSE/Plugins/ColonyCamera.ini", std::ios::binary | std::ios::ate);
@@ -87,8 +119,9 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     if (resetRequested.load()) { state = {}; reportedFrame = false; reportedMovement = false; }
     const auto pending = commands.exchange(0);
     if (pending & 4) LoadConfig();
-    if (pending & 1) { config.enabled = !config.enabled; resetRequested = true; spdlog::info("Enabled={}", config.enabled); }
+    if (pending & 1) { ReportTiming(0); ReportTiming(1); config.enabled = !config.enabled; resetRequested = true; spdlog::info("Enabled={}", config.enabled); }
     if (pending & 2) { leftShoulder = !leftShoulder; spdlog::info("Left shoulder={}", leftShoulder); }
+    Probe probe(self->id == RE::CameraState::kThirdPerson, config.enabled != 0);
     auto* camera = RE::PlayerCamera::GetSingleton();
     auto* player = RE::PlayerCharacter::GetSingleton();
     auto* ui = RE::UI::GetSingleton();
@@ -106,7 +139,9 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     if (mirror) {
         for (int i=0; i<2; ++i) { saved[i] = shoulderSettings[i]->data.f; shoulderSettings[i]->data.f = -saved[i]; }
     }
+    auto stamp = probe.Mark();
     originalUpdate(self, next);
+    probe.result.native = probe.Elapsed(stamp);
     if (mirror) for (int i=0; i<2; ++i) shoulderSettings[i]->data.f = saved[i];
     if (!eligible || camera->currentState.get() != self || (next && next.get() != self)) {
         state = {}; lastTick = {}; return;
@@ -150,15 +185,20 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     }
     const auto q = self->rotation;
     CameraFrame frame{{native.x, native.y, native.z}, {q.w, q.x, q.y, q.z}, dt, reset ? 1u : 0u};
+    stamp = probe.Mark();
     auto candidate = cc_step(state, frame, profile);
+    probe.result.math = probe.Elapsed(stamp);
     if (!candidate.initialized) { state = {}; return; }
     RE::NiPoint3 position{candidate.position[0], candidate.position[1], candidate.position[2]};
     // Native collision is deliberately last. Never interpolate away from its correction.
+    stamp = probe.Mark();
     camera->CheckCameraCollision(position, true);
+    probe.result.collision = probe.Elapsed(stamp);
     if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
         state = {}; return;
     }
     candidate.position[0] = position.x; candidate.position[1] = position.y; candidate.position[2] = position.z;
+    stamp = probe.Mark();
     if (!scene::PublishPosition(self->translation, root->local.translate, root->world.translate,
             rendered->world.translate, position, root->parent ? &root->parent->world : nullptr)) {
         static bool warned = false;
@@ -169,6 +209,8 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     // Refresh the actual render camera's projection after changing its world position.
     static REL::Relocation<void (*)(RE::NiCamera*)> updateMatrix{RELOCATION_ID(69271, 70641)};
     updateMatrix(rendered);
+    probe.result.scene = probe.Elapsed(stamp);
+    probe.result.applied = true;
     appliedTo = self;
     const float dx = position.x-native.x, dy = position.y-native.y, dz = position.z-native.z;
     if (!reportedMovement && dx*dx+dy*dy+dz*dz > 0.01f) {
@@ -260,7 +302,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,1,2,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,1,3,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -274,7 +316,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>((*directory / "ColonyCamera.log").string(), true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Colony Camera 0.1.2 alpha; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Colony Camera 0.1.3 diagnostic; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

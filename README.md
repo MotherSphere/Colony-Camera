@@ -1,7 +1,7 @@
 # Colony Camera
 
 Mod de caméra indépendant pour Skyrim, écrit en Rust avec une passerelle C++
-CommonLibSSE-NG. **Version 0.1.2 alpha : correction de l’intégration caméra, validation en jeu requise.** Ce n'est pas une version de SmoothCam ni une copie de son code.
+CommonLibSSE-NG. **Version 0.1.3 diagnostic : mesure du coût CPU après validation visuelle de 0.1.2.** Ce n'est pas une version de SmoothCam ni une copie de son code.
 
 ## Fonctionnalités de cette alpha
 
@@ -31,7 +31,7 @@ Papyrus nécessaire. Compilation Windows x64 ; chargement initial observé sous 
 1. Sauvegarder sa configuration, fermer Skyrim et désactiver SmoothCam ainsi que
    les autres remplaçants complets de la caméra à la troisième personne. Improved Camera
    peut rester activé pour cet essai : son interception des collisions est conservée.
-2. Installer le dossier `Colony Camera 0.1.2 alpha` dans un gestionnaire de mods.
+2. Installer le dossier `Colony Camera 0.1.3 diagnostic` dans un gestionnaire de mods.
    Il doit contenir `SKSE/Plugins/ColonyCamera.dll` et `ColonyCamera.ini`.
 3. Lancer Skyrim via SKSE et tester sur une sauvegarde de test.
 4. Consulter `Documents/My Games/Skyrim Special Edition/SKSE/ColonyCamera.log`
@@ -144,3 +144,27 @@ transformation invalide et application réussie. La détection d’Improved Came
 reconnaît aussi son vrai nom de fichier `ImprovedCamera.dll`.
 Le jeu doit être relancé pour charger cette DLL ; la levée du blocage observé
 reste à confirmer avec le nouveau journal.
+
+## Mesure de performances — 0.1.3 diagnostic
+
+L’utilisateur rapporte 200 FPS désactivé contre 170 FPS lors de rotations en
+course, activé. Ce signal A/B ne suffit pas à attribuer le coût à une fonction.
+Cette version conserve le comportement de caméra et mesure une mise à jour sur
+seize. Bilan après 64 échantillons (environ cinq secondes à 200 FPS), également
+lors d’une bascule Ctrl+F8. Aucune ligne de performance par image.
+
+`PERF` distingue activé/désactivé. `mean_us` donne les moyennes en microsecondes,
+`own` exclut la fonction précédente (`previous_chain`, moteur et autres mods),
+`collision`, `rust` et `scene` détaillent des portions de notre temps. Les
+moyennes portent sur tous les échantillons du bloc, y compris ceux sans effet :
+`applied` indique combien ont réellement publié une position. `peak_own_us`
+est le maximum échantillonné, pas le pire frame garanti ni un percentile.
+
+Courir et tourner pendant vingt secondes, basculer Ctrl+F8, refaire le même
+trajet vingt secondes puis réactiver. Éviter menus, chargements et changements
+de réglages pendant la comparaison. Fournir le journal ColonyCamera.log.
+
+Ces durées murales incluent les interruptions éventuelles par le système, ne mesurent ni le
+GPU ni le temps complet d’une image. Le traitement des commandes et les bilans
+écrits hors de la sonde sont exclus. L’instrumentation a elle-même un petit coût
+non calibré : elle sert à localiser le problème, pas à certifier une perte de FPS.

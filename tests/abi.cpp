@@ -1,12 +1,23 @@
 #include "../plugin/core.h"
 #include "../plugin/runtime.h"
 #include "../plugin/scene.h"
+#include "../plugin/timing.h"
 #include <cassert>
 #include <RE/N/NiTransform.h>
 #include <cmath>
 #include <cstring>
 #include <limits>
 int main() {
+    timing::Totals measured;
+    measured.Add({1000, 800, 100, 20, 30, true});
+    measured.Add({600, 400, 0, 0, 0, false});
+    assert(measured.samples == 2 && measured.applied == 1);
+    assert(measured.own / measured.samples == 200);
+    assert(measured.native / measured.samples == 600);
+    assert(measured.collision == 100 && measured.peakOwn == 200);
+    measured = {};
+    assert(measured.samples == 0 && measured.own == 0);
+
     // Regression: writing only ThirdPersonState leaves the rendered camera unmoved.
     RE::NiPoint3 statePos{10,20,30}, local{10,20,30}, world{10,20,30}, rendered{11,22,33};
     scene::PublishPosition(statePos, local, world, rendered, {40,50,60});
