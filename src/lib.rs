@@ -1,10 +1,20 @@
-//! Independent camera math. Positions are world-space; rotations are w,x,y,z.
+//! Independent deterministic camera math. Positions are world-space; rotations are w,x,y,z.
+mod config;
+mod coordinator;
+pub use config::*;
+pub use coordinator::*;
+
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct State {
     pub position: [f32; 3],
     pub native: [f32; 3],
     pub initialized: u32,
+    pub base: [f32; 3],
+    pub offset: [f32; 3],
+    pub zoom: f32,
+    pub fov: f32,
+    pub fov_delta: f32,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -13,13 +23,30 @@ pub struct Frame {
     pub rotation: [f32; 4],
     pub dt: f32,
     pub reset: u32,
+    pub world_fov: f32,
+}
+impl Default for Frame {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 3],
+            rotation: [1.0, 0.0, 0.0, 0.0],
+            dt: 0.0,
+            reset: 0,
+            world_fov: 75.0,
+        }
+    }
 }
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Profile {
     pub offset: [f32; 3],
     pub half_life: f32,
     pub max_lag: f32,
+    pub offset_half_life: f32,
+    pub zoom_half_life: f32,
+    pub fov_half_life: f32,
+    pub zoom: f32,
+    pub fov_offset: f32,
 }
 impl Default for Profile {
     fn default() -> Self {
@@ -27,6 +54,11 @@ impl Default for Profile {
             offset: [0.0; 3],
             half_life: 0.08,
             max_lag: 60.0,
+            offset_half_life: 0.08,
+            zoom_half_life: 0.12,
+            fov_half_life: 0.12,
+            zoom: 0.0,
+            fov_offset: 0.0,
         }
     }
 }
@@ -50,191 +82,116 @@ fn rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
         v[2] + w * t[2] + x * t[1] - y * t[0],
     ]
 }
+fn bounded(value: f32, min: f32, max: f32) -> bool {
+    value.is_finite() && (min..=max).contains(&value)
+}
 impl Profile {
     pub fn valid(self) -> bool {
-        self.offset
+        self.offset.iter().all(|x| bounded(*x, -300.0, 300.0))
+            && [
+                self.half_life,
+                self.offset_half_life,
+                self.zoom_half_life,
+                self.fov_half_life,
+            ]
             .iter()
-            .all(|x| x.is_finite() && x.abs() <= 300.0)
-            && self.half_life.is_finite()
-            && (0.0..=1.0).contains(&self.half_life)
-            && self.max_lag.is_finite()
-            && (0.0..=300.0).contains(&self.max_lag)
+            .all(|x| bounded(*x, 0.0, 1.0))
+            && bounded(self.max_lag, 0.0, 300.0)
+            && bounded(self.zoom, -300.0, 300.0)
+            && bounded(self.fov_offset, -60.0, 60.0)
     }
 }
+fn interpolate(current: f32, target: f32, dt: f32, half_life: f32) -> f32 {
+    if half_life == 0.0 {
+        return target;
+    }
+    let alpha = -(-std::f32::consts::LN_2 * dt / half_life).exp_m1();
+    current + (target - current) * alpha
+}
 pub fn step(mut state: State, frame: Frame, profile: Profile) -> State {
-    // Invalid engine input must never propagate NaN to the camera graph.
-    if !frame
-        .position
-        .iter()
-        .all(|x| x.is_finite() && x.abs() < 1e8)
-        || !frame
-            .rotation
-            .iter()
-            .all(|x| x.is_finite() && x.abs() <= 2.0)
+    // Invalid engine input must never be published to the camera graph.
+    if !frame.position.iter().all(|x| bounded(*x, -1e8, 1e8))
+        || !frame.rotation.iter().all(|x| bounded(*x, -2.0, 2.0))
         || frame.rotation.iter().map(|x| x * x).sum::<f32>() < 0.01
         || !frame.dt.is_finite()
         || frame.dt < 0.0
+        || !bounded(frame.world_fov, 1.0, 179.0)
         || !profile.valid()
     {
         state.initialized = 0;
         return state;
     }
-    let offset = rotate(frame.rotation, profile.offset);
-    let target = std::array::from_fn(|i| frame.position[i] + offset[i]);
     let reset = state.initialized != 1
         || frame.reset != 0
         || frame.dt > 0.25
-        || !state.position.iter().all(|x| x.is_finite())
-        || !state.native.iter().all(|x| x.is_finite())
+        || !state
+            .position
+            .iter()
+            .chain(&state.native)
+            .chain(&state.base)
+            .all(|x| bounded(*x, -1.1e8, 1.1e8))
+        || !state.offset.iter().all(|x| bounded(*x, -300.0, 300.0))
+        || !bounded(state.zoom, -300.0, 300.0)
+        || !bounded(state.fov, 1.0, 179.0)
+        || !bounded(state.fov_delta, -60.0, 60.0)
         || length(subtract(frame.position, state.native)) > 1000.0;
-    if reset || profile.half_life == 0.0 {
-        state.position = target;
+    // Bound the adjusted target, then interpolate its effective delta. Clamping
+    // every intermediate result to 30..150 would prevent a smooth return to an
+    // unadjusted native FOV outside that range.
+    let target_fov_delta = if profile.fov_offset == 0.0 {
+        0.0
     } else {
-        let alpha = -(-std::f32::consts::LN_2 * frame.dt / profile.half_life).exp_m1();
-        state.position =
-            std::array::from_fn(|i| state.position[i] + (target[i] - state.position[i]) * alpha);
-        let lag = subtract(state.position, target);
-        let distance = length(lag);
-        if distance > profile.max_lag {
-            state.position =
-                std::array::from_fn(|i| target[i] + lag[i] * (profile.max_lag / distance));
-        }
+        (frame.world_fov + profile.fov_offset).clamp(30.0, 150.0) - frame.world_fov
+    };
+    if reset {
+        state.base = frame.position;
+        state.offset = profile.offset;
+        state.zoom = profile.zoom;
+        state.fov_delta = target_fov_delta;
+    } else {
+        state.base = std::array::from_fn(|i| {
+            interpolate(
+                state.base[i],
+                frame.position[i],
+                frame.dt,
+                profile.half_life,
+            )
+        });
+        state.offset = std::array::from_fn(|i| {
+            interpolate(
+                state.offset[i],
+                profile.offset[i],
+                frame.dt,
+                profile.offset_half_life,
+            )
+        });
+        state.zoom = interpolate(state.zoom, profile.zoom, frame.dt, profile.zoom_half_life);
+        state.fov_delta = interpolate(
+            state.fov_delta,
+            target_fov_delta,
+            frame.dt,
+            profile.fov_half_life,
+        );
     }
+    // Interpolate only our additive FOV adjustment. Engine-driven FOV/zoom
+    // changes stay immediate and never become part of the plugin's history.
+    state.fov = (frame.world_fov + state.fov_delta).clamp(1.0, 179.0);
+    let lag = subtract(state.base, frame.position);
+    let distance = length(lag);
+    if distance > profile.max_lag {
+        state.base =
+            std::array::from_fn(|i| frame.position[i] + lag[i] * (profile.max_lag / distance));
+    }
+    let mut local_offset = state.offset;
+    local_offset[1] += state.zoom;
+    let world_offset = rotate(frame.rotation, local_offset);
+    state.position = std::array::from_fn(|i| state.base[i] + world_offset[i]);
     state.native = frame.position;
     state.initialized = 1;
     state
 }
-/// Value-only ABI: no game pointers or allocation cross the language boundary.
+/// Value-only ABI: no game pointers or per-frame allocation cross the boundary.
 #[no_mangle]
 pub extern "C" fn cc_step(state: State, frame: Frame, profile: Profile) -> State {
     step(state, frame, profile)
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct Config {
-    pub profiles: [Profile; 3],
-    pub keys: [u32; 3],
-    pub enabled: u32,
-}
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            profiles: [
-                Profile::default(),
-                Profile {
-                    half_life: 0.04,
-                    ..Profile::default()
-                },
-                Profile {
-                    half_life: 0.0,
-                    max_lag: 0.0,
-                    ..Profile::default()
-                },
-            ],
-            keys: [0x42, 0x43, 0x44], // Ctrl+F8 / Ctrl+F9 / Ctrl+F10, SKSE keyboard scan codes
-            enabled: 1,
-        }
-    }
-}
-/// Parse atomically: a bad setting rejects the whole replacement configuration.
-pub fn parse_config(text: &str) -> Result<Config, String> {
-    let mut config = Config::default();
-    let mut section = "general";
-    let mut seen = std::collections::HashSet::new();
-    for (index, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with(['#', ';']) {
-            continue;
-        }
-        if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            if !["general", "exploration", "combat", "aim"].contains(&name) {
-                return Err(format!("line {}: unknown section", index + 1));
-            }
-            section = name;
-            continue;
-        }
-        let (key, value) = line
-            .split_once('=')
-            .ok_or_else(|| format!("line {}: expected key=value", index + 1))?;
-        let (key, value) = (key.trim(), value.trim());
-        if !seen.insert((section, key)) {
-            return Err(format!("line {}: duplicate key", index + 1));
-        }
-        if section == "general" {
-            if key == "enabled" {
-                config.enabled = match value {
-                    "true" => 1,
-                    "false" => 0,
-                    _ => return Err("enabled must be true or false".into()),
-                };
-            } else {
-                let idx = match key {
-                    "toggle_key" => 0,
-                    "shoulder_key" => 1,
-                    "reload_key" => 2,
-                    _ => return Err(format!("unknown key: {key}")),
-                };
-                let code: u32 = value.parse().map_err(|_| "key must be a scan code")?;
-                if !(1..=211).contains(&code) || [29, 157].contains(&code) {
-                    return Err(
-                        "key outside keyboard scan code range or reserved Ctrl modifier".into(),
-                    );
-                }
-                config.keys[idx] = code;
-            }
-        } else {
-            let idx = match section {
-                "exploration" => 0,
-                "combat" => 1,
-                _ => 2,
-            };
-            let p = &mut config.profiles[idx];
-            let number: f32 = value.parse().map_err(|_| "expected number")?;
-            match key {
-                "x" => p.offset[0] = number,
-                "y" => p.offset[1] = number,
-                "z" => p.offset[2] = number,
-                "half_life" => p.half_life = number,
-                "max_lag" => p.max_lag = number,
-                _ => return Err(format!("unknown key: {key}")),
-            }
-            if !p.valid() {
-                return Err(format!("invalid value for {key}"));
-            }
-        }
-    }
-    if config.keys[0] == config.keys[1]
-        || config.keys[0] == config.keys[2]
-        || config.keys[1] == config.keys[2]
-    {
-        return Err("keyboard bindings must differ".into());
-    }
-    Ok(config)
-}
-#[no_mangle]
-pub extern "C" fn cc_defaults() -> Config {
-    Config::default()
-}
-/// # Safety
-/// `bytes` must reference `len` readable bytes; `output` must be writable and aligned.
-/// Neither region may overlap. Returns nonzero without writing on any parse error.
-#[no_mangle]
-pub unsafe extern "C" fn cc_parse_config(bytes: *const u8, len: usize, output: *mut Config) -> u32 {
-    if bytes.is_null() || output.is_null() || len > 65536 {
-        return 1;
-    }
-    let data = unsafe { std::slice::from_raw_parts(bytes, len) };
-    let Ok(text) = std::str::from_utf8(data) else {
-        return 2;
-    };
-    match parse_config(text) {
-        Ok(config) => {
-            unsafe {
-                output.write(config);
-            }
-            0
-        }
-        Err(_) => 3,
-    }
 }

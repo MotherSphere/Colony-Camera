@@ -1,0 +1,80 @@
+#include "../plugin/timing.h"
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+
+namespace {
+void Require(bool condition, const char* message) {
+    if (!condition) throw std::runtime_error(message);
+}
+}
+int main() {
+    try {
+        timing::Totals totals;
+        Require(totals.SampledCount() == 0 && totals.SampledPercentile(0.95) == 0,
+            "Empty timing window must return zero");
+        totals.Add({1000, 800, 100, 20, 30, true});
+        totals.Add({650, 600, 0, 0, 0, false});
+        totals.Add({400, 500, 0, 0, 0, false});
+        Require(totals.samples == 3 && totals.applied == 1 && totals.SampledCount() == 3,
+            "Applied and sampled counts disagree");
+        Require(totals.own == 250 && totals.native == 1900 && totals.peakOwn == 200,
+            "Own callback time must exclude previously chained work and clamp negative differences");
+        Require(totals.collision == 100 && totals.math == 20 && totals.scene == 30,
+            "Per-stage totals changed");
+        Require(totals.SampledPercentile(0.5) == 50 && totals.SampledPercentile(0.95) == 200,
+            "Mixed sample quantiles are incorrect");
+        Require(totals.SampledPercentile(-1) == 0 && totals.SampledPercentile(2) == 200,
+            "Finite out-of-range quantiles must select a boundary");
+        Require(totals.SampledPercentile(std::numeric_limits<double>::quiet_NaN()) == 0
+            && totals.SampledPercentile(std::numeric_limits<double>::infinity()) == 0,
+            "Nonfinite quantiles must not index the sample buffer");
+
+        // Querying percentiles must not reorder the chronological ring before
+        // later writes replace its oldest samples.
+        totals = {};
+        for (unsigned index = 1; index <= 64; ++index) totals.Add({double(index), 0, 0, 0, 0, false});
+        Require(totals.SampledPercentile(0.50) == 32 && totals.SampledPercentile(0.95) == 61
+            && totals.SampledPercentile(0.99) == 64, "Nearest-rank p50/p95/p99 are incorrect");
+        for (unsigned index = 65; index <= 80; ++index) totals.Add({double(index), 0, 0, 0, 0, false});
+        Require(totals.samples == 80 && totals.SampledCount() == 64 && totals.own == 3240,
+            "Cumulative totals and bounded sample window must be independent");
+        Require(totals.SampledPercentile(0) == 17 && totals.SampledPercentile(0.50) == 48
+            && totals.SampledPercentile(0.95) == 77 && totals.SampledPercentile(0.99) == 80,
+            "Ring rollover retained old samples or changed nearest-rank ordering");
+        timing::Totals descending;
+        for (unsigned value = 64; value > 0; --value) descending.Add({double(value), 0, 0, 0, 0, false});
+        Require(descending.SampledPercentile(0.50) == 32, "Descending sample quantile is incorrect");
+        descending.Add({65, 0, 0, 0, 0, false});
+        Require(descending.SampledPercentile(0) == 1 && descending.SampledPercentile(0.50) == 32
+            && descending.SampledPercentile(0.99) == 65,
+            "Percentile query reordered the ring and evicted the wrong sample");
+
+        const auto previous = totals;
+        for (const auto invalid : {
+            timing::Sample{std::numeric_limits<double>::quiet_NaN(), 0, 0, 0, 0, true},
+            timing::Sample{100, std::numeric_limits<double>::infinity(), 0, 0, 0, true},
+            timing::Sample{100, 10, -1, 0, 0, true},
+            timing::Sample{100, 10, 0, std::numeric_limits<double>::quiet_NaN(), 0, true},
+            timing::Sample{100, 10, 0, 0, -1, true}}) totals.Add(invalid);
+        Require(totals.samples == previous.samples && totals.applied == previous.applied
+            && totals.own == previous.own && totals.native == previous.native
+            && totals.SampledPercentile(0.5) == previous.SampledPercentile(0.5),
+            "Invalid measurements partially changed timing statistics");
+
+        totals = {};
+        totals.Add({(std::numeric_limits<double>::max)(), 0, 0, 0, 0, false});
+        totals.Add({(std::numeric_limits<double>::max)(), 0, 0, 0, 0, true});
+        Require(totals.samples == 1 && totals.applied == 0 && totals.SampledCount() == 1
+            && std::isfinite(totals.own), "Overflowing totals must reject the entire sample");
+        totals = {};
+        Require(totals.samples == 0 && totals.applied == 0 && totals.own == 0 && totals.peakOwn == 0
+            && totals.SampledCount() == 0 && totals.SampledPercentile(0.99) == 0,
+            "Reset did not clear all timing history");
+        std::cout << "Sampled callback timing statistics passed.\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "Timing test failed: " << error.what() << '\n';
+        return 1;
+    }
+}

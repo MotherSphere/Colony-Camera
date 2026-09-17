@@ -59,9 +59,16 @@ int main() {
     }
     auto c = cc_defaults();
     assert(c.enabled == 1 && c.keys[0] == 0x42);
-    CameraFrame f{{100,200,300},{1,0,0,0},0.016f,1};
+    CameraFrame f{{100,200,300},{1,0,0,0},0.016f,1,75};
     auto s = cc_step({}, f, c.profiles[0]);
     assert(s.initialized == 1 && s.position[0] == 100 && s.position[2] == 300);
+    auto adjusted = c.profiles[0];
+    adjusted.fov_offset = 12;
+    s = cc_step({}, f, adjusted);
+    assert(s.fov == 87 && s.fov_delta == 12);
+    f.reset = 0; f.world_fov = 55;
+    s = cc_step(s, f, adjusted);
+    assert(s.fov == 67 && s.fov_delta == 12);
     const char* good = "[combat]\nx=42\n";
     assert(cc_parse_config(reinterpret_cast<const unsigned char*>(good), std::strlen(good), &c) == 0);
     assert(c.profiles[1].offset[0] == 42);
@@ -70,4 +77,33 @@ int main() {
     assert(cc_parse_config(reinterpret_cast<const unsigned char*>(bad), std::strlen(bad), &c) != 0);
     assert(std::memcmp(&previous, &c, sizeof(c)) == 0);
     assert(cc_parse_config(nullptr, 0, &c) != 0);
+    assert(cc_validate_config(&c) == 0);
+    assert(cc_validate_config(nullptr) == 1);
+    std::size_t required = 0;
+    assert(cc_serialize_config(&c, nullptr, 0, &required) == 4 && required > 0);
+    unsigned char serialized[4096]{};
+    assert(required < sizeof(serialized));
+    assert(cc_serialize_config(&c, serialized, sizeof(serialized), &required) == 0);
+    CameraConfig roundtrip{};
+    assert(cc_parse_config(serialized, required, &roundtrip) == 0);
+    assert(std::memcmp(&c, &roundtrip, sizeof(c)) == 0);
+    // Rejected pointer layouts must not touch memory across the ABI.
+    alignas(CameraConfig) unsigned char unaligned[sizeof(CameraConfig) + 1]{};
+    assert(cc_parse_config(serialized, required, reinterpret_cast<CameraConfig*>(unaligned + 1)) == 1);
+    assert(cc_parse_config(reinterpret_cast<const unsigned char*>(&c), sizeof(c), &c) == 1);
+    assert(cc_serialize_config(&c, reinterpret_cast<unsigned char*>(&c), sizeof(c), &required) == 1);
+
+    CameraContext context{CC_THIRD_PERSON, CC_AVAILABLE | CC_CONTROLS | CC_WEAPON_DRAWN,
+        1, 0, 0, 0};
+    auto decision = cc_coordinate({}, context);
+    assert(decision.owner == CC_THIRD_PERSON && decision.profile == CC_COMBAT && decision.reset == 1);
+    context.flags |= CC_AIMING;
+    decision = cc_coordinate(decision.next, context);
+    assert(decision.profile == CC_AIM && decision.reset == 0);
+    context.flags |= CC_DEAD;
+    decision = cc_coordinate(decision.next, context);
+    assert(decision.owner == CC_NATIVE && decision.reason == CC_DEATH && decision.reset == 1);
+    context = {CC_FIRST_PERSON, CC_AVAILABLE | CC_CONTROLS, 1, 1, 0, 0};
+    decision = cc_coordinate(decision.next, context);
+    assert(decision.owner == CC_NATIVE && decision.reason == CC_FIRST_PERSON_UNAVAILABLE);
 }
