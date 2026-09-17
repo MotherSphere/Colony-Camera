@@ -1,10 +1,11 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.5 is a development candidate** with configurable
+CommonLibSSE-NG bridge. **0.2.6 is a diagnostic development candidate** with configurable
 third-person transitions, native settings menus and an opt-in first-person body
-experiment. It corrects runtime weapon-state access, preserves native equipment
-during draw transitions and removes blanket body-equipment culling. It is not a complete
+experiment. It adds in-game body/view measurements and the active log location
+to investigate a reported body-facing problem; it does not change body yaw or
+claim to fix that problem. It is not a complete
 SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
@@ -72,9 +73,16 @@ reads now use `AsActorState()`, as the coordinator already did. A false sheathed
 reading could hide the native rig while showing body hands, and 0.2.4 also hid all
 body weapon clones. The native aim fallback uses the same corrected accessor.
 The candidate preserves body weapon/shield/quiver clones and keeps the native rig
-available from the draw request through sheathing. These are bounded fixes, not
-confirmation that the tester's missing weapon is resolved. Head masks remain;
+available from the draw request through sheathing. The tester confirmed that
+weapons are visible in 0.2.5. Head masks remain;
 selected body upper arms still shrink to avoid duplicate native combat arms.
+
+With alignment enabled in 0.2.5, the tester still reports the body turning or
+moving sideways when looking down and turning the view. It does not recenter on
+its own; turning back in the opposite direction is required. The yaw cause is
+unconfirmed. 0.2.6 exposes a snapshot of view/body headings and the eye landmark
+in body-local space, captured before opening settings resets the active pose.
+This diagnostic addition preserves the existing alignment behavior.
 
 While the body experiment is enabled, `First-person motion window` log lines
 count applied, native-fallback, not-ready and rejected publications separately
@@ -97,11 +105,14 @@ Reference inspection found camera-ownership cooperation between Improved Camera
 and SmoothCam, not a generic invisible-weapon patch. Improved Camera's default
 arm selection depends on equipment/actions rather than a look-up/down threshold;
 its pitch-dependent near clipping is a separate feature.
+Reference inspection found no ordinary real-first-person hook that forces body
+yaw or adds a missing body-animation tick. Native scene-update verification also
+shows both player models updating; this does not establish the reported yaw cause.
 
 A supplied crash report from 0.2.4 strongly fits an overflowing native culling
 scratch-buffer copy in the exact Skyrim executable. The report does not identify
 the producer of the excessive frustum count or establish which mod caused it.
-0.2.5 does not patch that engine function and is not a claimed crash fix.
+This candidate does not patch that engine function and is not a claimed crash fix.
 
 Alignment, collision, projectile origins, interiors, head/hair/helmet clipping,
 weapons, shields, torches, spell effects and shadows still require testing.
@@ -128,7 +139,8 @@ entry-point checks reject unexpected code before the affected hooks are installe
    off. Enable it separately after checking ordinary third-person operation.
 4. Inspect `ColonyCamera.log` in the active SKSE log directory, normally under
    `Documents/My Games/Skyrim Special Edition/SKSE`. Documents may be redirected;
-   Proton uses the game's actual prefix.
+   Proton uses the game's actual prefix. **Diagnostics > Log location** displays
+   the exact path selected by the running plugin.
 
 TDM, SkyParkour, animation/skeleton changes, ENB, Community Shaders and body mods
 require separate compatibility tests. Hook chaining does not establish visual or
@@ -152,6 +164,13 @@ controller navigation. The pages are **General, Third Person, First Person,
 Aiming, Presets, Compatibility and Diagnostics**. There is no controller opening
 chord or press-to-bind capture. General > Controls edits numeric SKSE keyboard
 scan codes; all shortcuts require Ctrl. The original F8/F9/F10 identities remain.
+
+**Diagnostics > Body facing** shows the last available gameplay pose captured
+before the settings menu opens, including view/body headings and the body's local
+eye anchor. It is a snapshot, not a live view while the menu is open. Open it after
+reproducing an offset and compare with a centered pose; **Diagnostics > Log location**
+provides the active log path separately. These pages allow reporting measurements
+without first locating the log file, including under Proton.
 
 Numeric fields use Increase/Decrease and ten-step buttons. Changes apply in
 memory immediately. **General > Save settings** persists them by flushing a
@@ -245,7 +264,7 @@ cmake --build build-cross --parallel 2
 
 That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
 Its Windows test executables require Windows or a separate Wine test prefix.
-The 0.2.5 cross-build is not yet verified.
+The 0.2.6 cross-build is not yet verified.
 
 Validate entry bytes, Address Library mappings and camera RTTI against a
 legitimate local game installation:
@@ -254,21 +273,19 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
-The 0.2.5 Windows x64 DLL and targeted native test executable compiled. New
-regressions cover the complete draw/sheath sequence, torch state, readied fists,
-unknown states and restoration of owned native-root visibility. Existing heading
-and transform checks remain. Windows Application Control blocked both the canonical
-body-position test and DLL-load test host before launch. Fresh Code Integrity
-event 3077 confirms the signing-policy rejection. These tests did **not** execute,
-and the 0.2.5 DLL was not dynamically loaded locally. No alternate executable or
-security-policy change was used to circumvent the block.
+The 0.2.6 Windows x64 DLL and facing-math test executable compiled. Regressions
+cover signed yaw wrapping, cardinal directions, anchor invariance under rigid
+motion/scale and invalid transforms. Windows Application Control blocked the
+canonical facing-math and DLL-load test hosts before launch. Fresh Code Integrity
+event 3077 confirmed the rejection; those tests did not execute. No alternate
+executable or security-policy change was used to circumvent the block.
 
-The full suite is **not green**. The previous runtime verification covered 14
-entries, two camera RTTI tables, both guarded callsites and 15 negative cases;
-this revision changes none of those hooks, runtime addresses or ABI layouts.
-Rust algorithms and settings are unchanged. Prior revision test passes do not
-validate this candidate. **Weapon visibility and gameplay validation remain pending.** Compilation
-and static export checks cannot verify rendering or compatibility.
+The full suite is **not green**. Previous runtime verification covered 14 entries,
+two camera RTTI tables, both guarded callsites and 15 negative cases. Prior revision
+passes do not validate this candidate. The tester confirmed weapon visibility in
+0.2.5; **0.2.6 diagnostics and gameplay validation remain pending**, and the reported
+body-facing issue remains unresolved. Compilation and static export checks cannot
+verify rendering or compatibility.
 
 Before using a candidate broadly, check new/load game, repeated POV switching,
 walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transitions,

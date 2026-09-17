@@ -63,6 +63,14 @@ CameraCoordinator coordinator{};
 CameraDecision decision{};
 first_person::Renderer bodyRenderer;
 settings::Menu settingsMenu;
+struct FacingSnapshot {
+    body_facing::Sample sample{};
+    Clock::time_point captured{};
+    first_person::Status status = first_person::Status::inactive;
+    bool eye = false;
+};
+FacingSnapshot lastBodyFacing;
+std::string activeLogPath;
 RE::NiPointer<RE::NiCamera> fovCamera;
 camera::OwnedValue<float> ownedWorldFov;
 std::array<camera::OwnedValue<float>, 4> ownedFrustum;
@@ -183,6 +191,7 @@ void ApplyConfig(const CameraConfig& replacement) {
     bodyRenderer.Reset();
     ResetFirstView();
     bodyTraces = {};
+    lastBodyFacing = {};
     reportedBodyAlignment = false;
     reportedViewMotion = false;
     if (appliedTo) RestoreNative(appliedTo.get());
@@ -298,6 +307,19 @@ void ProcessCommands() {
     if (pending & 1) { for (unsigned mode = 0; mode < std::size(timings); ++mode) ReportTiming(mode); auto replacement = config; replacement.enabled ^= 1; ApplyConfig(replacement); spdlog::info("Enabled={}", config.enabled); }
     if (pending & 2) { leftShoulder = !leftShoulder; spdlog::info("Left shoulder={}", leftShoulder); }
     if ((pending & 8) && menuAvailable) {
+        // Freeze the last camera-view sample before opening the modal menu resets
+        // the renderer. Never measure the restored/menu pose as gameplay evidence.
+        const auto& facing = lastBodyFacing.sample;
+        const auto facingText = facing.available
+            ? std::format("Body facing - last camera-view sample\nView yaw: {:.1f} deg\nBody yaw: {:.1f} deg\nBody minus view: {:.1f} deg\n{} in body coordinates: ({:.2f}, {:.2f}, {:.2f})\nSample age at menu opening: {:.2f} s\nScene status: {}\nClose this menu, turn, then reopen to compare.",
+                facing.viewYawDegrees, facing.bodyYawDegrees, facing.yawGapDegrees,
+                lastBodyFacing.eye ? "Eye" : "Head", facing.anchorLocal.x, facing.anchorLocal.y, facing.anchorLocal.z,
+                std::chrono::duration<double>(Clock::now() - lastBodyFacing.captured).count(),
+                lastBodyFacing.status == first_person::Status::applied ? "Applied" : "Rejected")
+            : std::string("Body facing\nNo usable camera-view sample. Enable Body Experiment, enter ordinary first person and close the menu briefly before reopening it.");
+        const auto logText = activeLogPath.empty()
+            ? std::string("No log path was recorded.")
+            : std::format("Log location reported by the game\n{}\nUnder Proton, this Windows path is inside the game's active prefix (pfx/drive_c).", activeLogPath);
         bodyRenderer.Reset();
         ResetFirstView();
         if (appliedTo) RestoreNative(appliedTo.get());
@@ -317,10 +339,10 @@ void ProcessCommands() {
             ? std::format("\nLast scene publication: {}. Bone position error {:.3f}, scale error {:.6f}. Visual framing still needs checking.",
                 publication.matched ? "verified" : "rejected", publication.maxBonePositionError, publication.maxBoneScaleError)
             : std::string("\nNo scene publication sample yet.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.5 candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f}){}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.6 diagnostic candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f}){}{}",
             decision.owner < std::size(owners) ? owners[decision.owner] : "Unknown",
             decision.reason < std::size(reasons) ? reasons[decision.reason] : "Unknown", config.third_person_enabled != 0,
-            firstHooksInstalled, firstConflict, lastViewCorrection.x, lastViewCorrection.y, lastViewCorrection.z, alignmentText, publicationText));
+            firstHooksInstalled, firstConflict, lastViewCorrection.x, lastViewCorrection.y, lastViewCorrection.z, alignmentText, publicationText), facingText, logText);
     }
 }
 
@@ -482,6 +504,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
 }
 
 void FirstBegin(RE::FirstPersonState* self) {
+    lastBodyFacing = {};
     if (appliedTo) RestoreNative(appliedTo.get());
     RestorePosition();
     bodyRenderer.Reset(); RestoreFov(); state = {}; coordinator = {}; lastTick = {};
@@ -492,6 +515,7 @@ void FirstBegin(RE::FirstPersonState* self) {
     originalFirstBegin(self);
 }
 void FirstEnd(RE::FirstPersonState* self) {
+    lastBodyFacing = {};
     bodyRenderer.Reset(); coordinator = {};
     ResetFirstView();
     originalFirstEnd(self);
@@ -512,6 +536,7 @@ void FirstUpdate(RE::FirstPersonState* self, RE::BSTSmartPointer<RE::TESCameraSt
 }
 
 void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
+    if (phaseIndex == 1) lastBodyFacing = {};
     const char* phase = phaseIndex == 0 ? "model" : "camera-view";
     auto* player = RE::PlayerCharacter::GetSingleton();
     auto* camera = RE::PlayerCamera::GetSingleton();
@@ -552,6 +577,10 @@ void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
     stamp = probe.Mark();
     const auto status = bodyRenderer.Apply(player, viewEye,
         config.body_alignment, rendered, probe.sampled);
+    if (phaseIndex == 1) {
+        lastBodyFacing = {bodyRenderer.GetFacingSample(), Clock::now(), status,
+            bodyRenderer.GetAlignmentSample().frame.eye_available != 0};
+    }
     TraceBody(phaseIndex, status == first_person::Status::applied ? BodyOutcome::applied : BodyOutcome::rejected,
         static_cast<unsigned>(status), rendered);
     const double bodyMath = bodyRenderer.AlignmentMathMicroseconds();
@@ -622,6 +651,7 @@ void CameraViewUpdate(RE::TESCamera* self) {
     // call. Never align a new first-person body to the previous third-person eye.
     if (!camera || self != camera || !first || camera->currentState != beforeState
         || firstUpdatedInView != beforeState.get()) {
+        lastBodyFacing = {};
         bodyRenderer.Reset();
         if (first) TraceBody(1, BodyOutcome::view_not_ready);
         return;
@@ -753,6 +783,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
         if (appliedTo) RestoreNative(appliedTo.get());
         RestorePosition(); bodyRenderer.Reset(); ResetFirstView(); RestoreFov(); coordinator = {}; settingsMenu.Cancel();
         bodyTraces = {};
+        lastBodyFacing = {};
         input.Reset(); commands = 0; resetRequested = true;
     }
 }
@@ -760,7 +791,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,5,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,2,6,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -771,10 +802,11 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
     try {
         auto directory = SKSE::log::log_directory();
         if (!directory) return false;
+        activeLogPath = (*directory / "ColonyCamera.log").string();
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
-            std::make_shared<spdlog::sinks::basic_file_sink_mt>((*directory / "ColonyCamera.log").string(), true));
+            std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.5 candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.6 diagnostic candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

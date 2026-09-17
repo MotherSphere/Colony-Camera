@@ -15,6 +15,8 @@ class Menu {
     std::uint64_t generation = 0;
     bool open = false;
     std::string status;
+    std::string bodyFacing;
+    std::string logLocation;
     static constexpr const char* names[] = {"Exploration", "Combat", "Aiming", "Sprinting", "Sneaking", "Swimming", "Airborne"};
     struct Callback final : RE::IMessageBoxCallback {
         std::function<void(std::uint8_t)> action;
@@ -196,22 +198,34 @@ class Menu {
             } else if (b == count) Import((start + count < files.size()) ? page + 1 : 0); else Presets();
         });
     }
+    void Diagnostics() {
+        Page("Diagnostics\nBody facing records the last camera-view sample before this menu opened. Close the menu before comparing another pose.",
+            {"Status", "Body facing", "Log location", "Back"}, [this](auto b) {
+                if (b == 0) Notice(status + "\nCPU logs are sampled and do not measure FPS or GPU cost.", [this] { Diagnostics(); });
+                else if (b == 1) Notice(bodyFacing, [this] { Diagnostics(); });
+                else if (b == 2) Notice(logLocation, [this] { Diagnostics(); });
+                else Root();
+            });
+    }
     void Root() {
         Page("Camera Colony\nSettings apply immediately; General > Save persists them. Native menu navigation supports keyboard and controller.",
             {"General", "Third Person", "First Person", "Aiming", "Presets", "Compatibility", "Diagnostics", "Close"}, [this](auto b) {
             switch (b) { case 0: General(); break; case 1: Profiles(); break; case 2: FirstPerson(); break; case 3: Profile(CC_AIM); break;
             case 4: Presets(); break;
             case 5: Notice("Full camera providers compete for camera state. SmoothCam blocks this plugin; Improved Camera blocks our body experiment. TDM, SkyParkour, skeleton and rendering mod combinations require separate tests.", [this] { Root(); }); break;
-            case 6: Notice(status + "\nCPU logs are sampled and do not measure FPS or GPU cost. Visual validation is still required.", [this] { Root(); }); break;
+            case 6: Diagnostics(); break;
             default: open = false; ++generation; break; }
         });
     }
 public:
     bool IsOpen() const { return open; }
     void Cancel() { open = false; ++generation; }
-    void Open(const CameraConfig& config, std::function<void(const CameraConfig&)> onApply, std::string diagnostics) {
+    void Open(const CameraConfig& config, std::function<void(const CameraConfig&)> onApply, std::string diagnostics,
+        std::string facing, std::string logPath) {
         if (open) return;
-        draft = config; apply = std::move(onApply); status = std::move(diagnostics); open = true; ++generation; Root();
+        draft = config; apply = std::move(onApply); status = std::move(diagnostics);
+        bodyFacing = std::move(facing); logLocation = std::move(logPath);
+        open = true; ++generation; Root();
     }
 };
 }

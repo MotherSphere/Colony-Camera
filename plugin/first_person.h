@@ -1,5 +1,6 @@
 #pragma once
 #include "body_position.h"
+#include "body_facing.h"
 #include "core.h"
 #include "owned_value.h"
 #include <RE/Skyrim.h>
@@ -46,6 +47,7 @@ class Renderer {
     bool renderWorldDirty_ = false;
     body_position::PublicationSample publicationSample_{};
     AlignmentSample alignmentSample_{};
+    body_facing::Sample facingSample_{};
     double lastAlignmentMathUs_ = 0.0;
     bool usesNativeArms_ = true;
     Status status_ = Status::inactive;
@@ -107,6 +109,7 @@ public:
 
     [[nodiscard]] Status GetStatus() const { return status_; }
     [[nodiscard]] const AlignmentSample& GetAlignmentSample() const { return alignmentSample_; }
+    [[nodiscard]] const body_facing::Sample& GetFacingSample() const { return facingSample_; }
     [[nodiscard]] double AlignmentMathMicroseconds() const { return lastAlignmentMathUs_; }
     [[nodiscard]] const body_position::PublicationSample& GetPublicationSample() const { return publicationSample_; }
     [[nodiscard]] bool UsesNativeArms() const { return usesNativeArms_; }
@@ -152,6 +155,7 @@ public:
         bool measureMath = false) {
         Restore();
         alignmentSample_.available = false;
+        facingSample_ = {};
         publicationSample_.available = false;
         lastAlignmentMathUs_ = 0.0;
         auto* body = player ? player->Get3D(false) : nullptr;
@@ -209,6 +213,7 @@ public:
         if (!body_position::ViewHeading(cameraObject->world.rotate, heading))
             return status_ = Status::invalid_alignment;
         const auto eye = eyeAvailable ? eyeNode_->world.translate : RE::NiPoint3{};
+        facingSample_ = body_facing::Compare(heading, body_->world, eyeAvailable ? eye : head);
         const BodyAlignmentFrame frame{{viewEye.x, viewEye.y, viewEye.z},
             {head.x, head.y, head.z}, {heading[0], heading[1]}, body_->world.scale,
             {eye.x, eye.y, eye.z}, eyeAvailable ? 1u : 0u};
