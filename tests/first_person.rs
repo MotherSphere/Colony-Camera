@@ -6,6 +6,95 @@ fn frame() -> BodyAlignmentFrame {
         head: [0.0, 0.0, 125.0],
         heading: [0.0, 1.0],
         scale: 1.0,
+        eye: [0.0; 3],
+        eye_available: 0,
+    }
+}
+
+#[test]
+fn actual_eye_landmark_replaces_the_head_anchor_without_vertical_correction() {
+    let input = BodyAlignmentFrame {
+        head: [0.0, 0.0, 125.0],
+        eye: [2.0, 5.0, 129.0],
+        eye_available: 1,
+        ..frame()
+    };
+    let options = BodyAlignmentOptions::default();
+    let actual_eye = align_body(input, options);
+    assert_eq!(actual_eye.valid, 1);
+    close(actual_eye.translation, [-2.0, -17.0, 0.0]);
+    assert_eq!(actual_eye.vertical_error, 1.0);
+    let fallback = align_body(
+        BodyAlignmentFrame {
+            eye_available: 0,
+            ..input
+        },
+        options,
+    );
+    close(fallback.translation, [0.0, -12.0, 0.0]);
+    assert_eq!(fallback.vertical_error, 5.0);
+}
+
+#[test]
+fn absent_eye_storage_is_ignored_but_invalid_available_landmarks_fail_closed() {
+    let options = BodyAlignmentOptions::default();
+    let native_fallback = align_body(frame(), options);
+    for eye in [
+        [f32::NAN, 0.0, 125.0],
+        [0.0, 0.0, f32::INFINITY],
+        [1000.0, 0.0, 125.0],
+        [0.0, 0.0, 1.1e8],
+    ] {
+        let absent = BodyAlignmentFrame {
+            eye,
+            eye_available: 0,
+            ..frame()
+        };
+        assert_eq!(align_body(absent, options), native_fallback);
+        assert_eq!(
+            align_body(
+                BodyAlignmentFrame {
+                    eye_available: 1,
+                    ..absent
+                },
+                options
+            ),
+            BodyAlignmentResult::default()
+        );
+    }
+    assert_eq!(
+        align_body(
+            BodyAlignmentFrame {
+                eye_available: 2,
+                ..frame()
+            },
+            options
+        ),
+        BodyAlignmentResult::default()
+    );
+}
+
+#[test]
+fn selected_eye_height_only_changes_the_reported_vertical_gap() {
+    let input = BodyAlignmentFrame {
+        eye: [0.0, 2.0, 129.0],
+        eye_available: 1,
+        ..frame()
+    };
+    let options = BodyAlignmentOptions::default();
+    let baseline = align_body(input, options);
+    for eye_z in [100.0, 130.0, 145.0] {
+        let result = align_body(
+            BodyAlignmentFrame {
+                eye: [0.0, 2.0, eye_z],
+                ..input
+            },
+            options,
+        );
+        assert_eq!(result.valid, 1);
+        assert_eq!(result.translation, baseline.translation);
+        assert_eq!(result.translation[2], 0.0);
+        assert_eq!(result.vertical_error, 130.0 - eye_z);
     }
 }
 fn close(actual: [f32; 3], expected: [f32; 3]) {

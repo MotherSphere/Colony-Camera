@@ -55,12 +55,7 @@ inline bool JumpTarget(std::uintptr_t address, std::uintptr_t& target) {
     std::memcpy(&target, reinterpret_cast<const void*>(pointer), sizeof(target));
     return true;
 }
-// No patch is removed: the plugin retains and calls the original chain entry.
-inline bool Entry(const runtime::Entry& entry, std::uintptr_t base) {
-    if (entry.rva > UINTPTR_MAX - base) return false;
-    const auto address = base + entry.rva;
-    if (!Memory(address, entry.prefix.size(), true)) return false;
-    if (entry.matches(reinterpret_cast<const void*>(address))) return true;
+inline bool RelayChain(std::uintptr_t address) {
     std::array<std::uintptr_t, 4> visited{};
     auto current = address;
     for (std::size_t hop = 0; hop < visited.size(); ++hop) {
@@ -73,5 +68,41 @@ inline bool Entry(const runtime::Entry& entry, std::uintptr_t base) {
         current = target;
     }
     return false;
+}
+// No patch is removed: the plugin retains and calls the original chain entry.
+inline bool Entry(const runtime::Entry& entry, std::uintptr_t base) {
+    if (entry.rva > UINTPTR_MAX - base) return false;
+    const auto address = base + entry.rva;
+    if (!Memory(address, entry.prefix.size(), true)) return false;
+    if (entry.matches(reinterpret_cast<const void*>(address))) return true;
+    return RelayChain(address);
+}
+// Validate an E8 without changing it. Entry guards for the enclosing native
+// function and intended callee belong to the caller. Context is checked around
+// the operand so an existing call detour remains chainable. Publish its immediate
+// destination, not the terminal relay, and leave output unchanged on failure.
+inline bool SceneCallTarget(const runtime::SceneCall& call, std::uintptr_t base,
+    std::uintptr_t& target) {
+    constexpr std::size_t callSize = 5;
+    if (call.rva < call.before.size() || call.rva > UINTPTR_MAX - base
+        || call.target > UINTPTR_MAX - base) return false;
+    const auto address = base + call.rva;
+    if (address > UINTPTR_MAX - callSize - call.after.size()) return false;
+    const auto start = address - call.before.size();
+    const auto size = call.before.size() + callSize + call.after.size();
+    if (!Memory(start, size, true)) return false;
+    const auto* bytes = reinterpret_cast<const unsigned char*>(address);
+    if (bytes[0] != 0xE8
+        || std::memcmp(reinterpret_cast<const void*>(start), call.before.data(), call.before.size()) != 0
+        || std::memcmp(bytes + callSize, call.after.data(), call.after.size()) != 0) return false;
+    std::int32_t displacement;
+    std::memcpy(&displacement, bytes + 1, sizeof(displacement));
+    std::uintptr_t current = 0;
+    if (!Relative(address, callSize, displacement, current)) return false;
+    // Both the intended native function and a mod's replacement must resolve
+    // to module code. Anonymous code is accepted only as a bounded known relay.
+    if (!ModuleCode(current) && !RelayChain(current)) return false;
+    target = current;
+    return true;
 }
 }

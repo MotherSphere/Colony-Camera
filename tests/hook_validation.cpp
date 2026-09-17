@@ -4,6 +4,7 @@
 
 namespace {
 __declspec(noinline) int ChainTarget() { return 17; }
+__declspec(noinline) int ReplacementTarget() { return 29; }
 
 struct Pages {
     unsigned char* data;
@@ -51,7 +52,143 @@ void RelativeBranch(std::uintptr_t target, int direction) {
     DWORD before;
     assert(VirtualProtect(allocation, info.dwPageSize, PAGE_EXECUTE_READ, &before));
     assert(hooks::Entry(runtime::Entry{"Synthetic", 0, {}}, address));
+
+    // E8 operands may point forward/backward and may already call a different
+    // module function. Never replace that original destination with the native
+    // metadata target while installing our own chain.
+    assert(VirtualProtect(allocation, info.dwPageSize, PAGE_READWRITE, &before));
+    auto call = runtime::bodySceneCall;
+    call.rva = address + 32;
+    call.target = target;
+    std::memcpy(allocation + 32 - call.before.size(), call.before.data(), call.before.size());
+    std::memcpy(allocation + 37, call.after.data(), call.after.size());
+    allocation[32] = 0xE8;
+    const auto operand = static_cast<std::int32_t>(static_cast<std::int64_t>(target)
+        - static_cast<std::int64_t>(address + 37));
+    std::memcpy(allocation + 33, &operand, sizeof(operand));
+    assert(VirtualProtect(allocation, info.dwPageSize, PAGE_EXECUTE_READ, &before));
+    std::uintptr_t original = 0;
+    assert(hooks::SceneCallTarget(call, 0, original) && original == target);
+
+    assert(VirtualProtect(allocation, info.dwPageSize, PAGE_READWRITE, &before));
+    const auto replacement = reinterpret_cast<std::uintptr_t>(&ReplacementTarget);
+    const auto replacementOperand = static_cast<std::int32_t>(static_cast<std::int64_t>(replacement)
+        - static_cast<std::int64_t>(address + 37));
+    std::memcpy(allocation + 33, &replacementOperand, sizeof(replacementOperand));
+    assert(VirtualProtect(allocation, info.dwPageSize, PAGE_EXECUTE_READ, &before));
+    assert(ReplacementTarget() == 29 && replacement != target);
+    assert(hooks::SceneCallTarget(call, 0, original) && original == replacement);
     VirtualFree(allocation, 0, MEM_RELEASE);
+}
+
+void SceneCalls() {
+    Pages pages;
+    pages.Protect(0, PAGE_EXECUTE_READWRITE);
+    auto call = runtime::bodySceneCall;
+    call.rva = pages.Address(64);
+    call.target = reinterpret_cast<std::uintptr_t>(&ChainTarget);
+    std::memcpy(pages.data + 64 - call.before.size(), call.before.data(), call.before.size());
+    std::memcpy(pages.data + 69, call.after.data(), call.after.size());
+    auto relative = [&](std::size_t from, std::size_t to, unsigned char opcode = 0xE9) {
+        pages.data[from] = opcode;
+        const auto delta = static_cast<std::int32_t>(to) - static_cast<std::int32_t>(from + 5);
+        std::memcpy(pages.data + from + 1, &delta, sizeof(delta));
+    };
+    auto indirect = [&](std::size_t from, std::uintptr_t destination) {
+        pages.data[from] = 0xFF;
+        pages.data[from + 1] = 0x25;
+        const std::int32_t delta = 0;
+        std::memcpy(pages.data + from + 2, &delta, sizeof(delta));
+        std::memcpy(pages.data + from + 6, &destination, sizeof(destination));
+    };
+    auto rejected = [&](const runtime::SceneCall& spec, std::uintptr_t base = 0) {
+        std::uintptr_t unchanged = 0x1234;
+        assert(!hooks::SceneCallTarget(spec, base, unchanged));
+        assert(unchanged == 0x1234);
+    };
+
+    // An existing call through a known anonymous relay keeps that exact relay,
+    // while unknown private code is never treated as an executable mod function.
+    relative(64, 128, 0xE8);
+    indirect(128, call.target);
+    std::uintptr_t original = 0;
+    assert(hooks::SceneCallTarget(call, 0, original) && original == pages.Address(128));
+    auto based = call;
+    based.rva -= pages.Address();
+    based.target = 0;  // Native target is separately entry-guarded by integration.
+    assert(hooks::SceneCallTarget(based, pages.Address(), original));
+    assert(original == pages.Address(128));
+
+    // The call's surrounding instruction sequence is immutable; only its rel32
+    // operand may differ. Each refusal leaves the caller's chain pointer intact.
+    pages.data[64] = 0xE9;
+    rejected(call);
+    pages.data[64] = 0xE8;
+    pages.data[50] ^= 1;
+    rejected(call);
+    pages.data[50] ^= 1;
+    pages.data[80] ^= 1;
+    rejected(call);
+    pages.data[80] ^= 1;
+    pages.Protect(0, PAGE_READWRITE);
+    rejected(call);
+    pages.Protect(0, PAGE_EXECUTE_READWRITE);
+
+    relative(128, 256);
+    relative(256, 384);
+    relative(384, 512);
+    indirect(512, call.target);
+    assert(hooks::SceneCallTarget(call, 0, original) && original == pages.Address(128));
+    relative(512, 640);
+    indirect(640, call.target);
+    rejected(call);
+    relative(256, 128);
+    rejected(call);
+    indirect(128, pages.Address(128));
+    rejected(call);
+    indirect(128, pages.Address(pages.page));  // Committed data, not executable.
+    rejected(call);
+    relative(64, pages.page, 0xE8);
+    rejected(call);
+    relative(64, 128, 0xE8);
+    pages.data[128] = 0x48;  // Unsupported mov rax, immediate; jmp rax.
+    pages.data[129] = 0xB8;
+    std::memcpy(pages.data + 130, &call.target, sizeof(call.target));
+    pages.data[138] = 0xFF;
+    pages.data[139] = 0xE0;
+    rejected(call);
+
+    // Truncated context, relay instruction or indirect pointer must not cause a
+    // read into the no-access page, including the bytes after the E8 itself.
+    pages.Protect(pages.page, PAGE_NOACCESS);
+    auto truncated = call;
+    truncated.rva = pages.Address(pages.page - 5);
+    rejected(truncated);
+    relative(64, pages.page - 1, 0xE8);
+    pages.data[pages.page - 1] = 0xFF;
+    rejected(call);
+    relative(64, 128, 0xE8);
+    indirect(128, call.target);
+    const auto crossing = static_cast<std::int32_t>(pages.page - 4 - 134);
+    std::memcpy(pages.data + 130, &crossing, sizeof(crossing));
+    rejected(call);
+
+    auto invalid = call;
+    invalid.rva = 13;
+    rejected(invalid, pages.Address());
+    invalid.rva = UINTPTR_MAX;
+    rejected(invalid, 1);
+    invalid.rva = call.rva;
+    invalid.target = UINTPTR_MAX;
+    rejected(invalid, 1);
+    invalid = call;
+    invalid.rva = UINTPTR_MAX - 10;
+    rejected(invalid);
+    std::uintptr_t unchanged = 0x1234;
+    assert(!hooks::Relative(UINTPTR_MAX - 3, 5, 0, unchanged));
+    assert(!hooks::Relative(UINTPTR_MAX - 10, 5, 20, unchanged));
+    assert(!hooks::Relative(1, 5, INT32_MIN, unchanged));
+    assert(unchanged == 0x1234);
 }
 }
 
@@ -166,4 +303,5 @@ int main() {
 
     RelativeBranch(target, -1);
     RelativeBranch(target, 1);
+    SceneCalls();
 }

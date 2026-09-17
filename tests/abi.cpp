@@ -61,10 +61,15 @@ int main() {
     assert(c.enabled == 1 && c.keys[0] == 0x42);
     assert(c.first_person_enabled == 0 && c.body_alignment.alignment_enabled == 1);
     assert(c.body_alignment.body_backset == 12 && c.body_alignment.body_side == 0);
-    BodyAlignmentFrame body{{0,0,130},{0,0,125},{0,2},1};
+    BodyAlignmentFrame body{{0,0,130},{0,0,125},{0,2},1,{0,0,0},0};
     auto alignment = cc_align_body(body, c.body_alignment);
     assert(alignment.valid == 1 && alignment.translation[0] == 0 && alignment.translation[1] == -12);
     assert(alignment.translation[2] == 0 && alignment.vertical_error == 5);
+    body.eye[0] = 2; body.eye[1] = 5; body.eye[2] = 129; body.eye_available = 1;
+    alignment = cc_align_body(body, c.body_alignment);
+    assert(alignment.valid == 1 && alignment.translation[0] == -2 && alignment.translation[1] == -17);
+    assert(alignment.translation[2] == 0 && alignment.vertical_error == 1);
+    body.eye_available = 0;
     auto bodyOptions = c.body_alignment;
     bodyOptions.body_side = 4;
     body.scale = 2;

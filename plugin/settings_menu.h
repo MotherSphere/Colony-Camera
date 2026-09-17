@@ -132,7 +132,7 @@ class Menu {
         });
     }
     void FirstPerson() {
-        Page(std::format("First Person\nBody experiment: {}  Alignment: {}\nBody backset: {:.1f}  Sideways: {:.1f}\nAlignment places the body behind the native eye without resizing it or changing foot height. Native camera and hands are retained. Equipment and shadows still need testing.",
+        Page(std::format("First Person\nBody experiment: {}  Alignment: {}\nBody backset: {:.1f}  Sideways: {:.1f}\nNative camera; body arms while sheathed, native hands for weapons or a torch. Alignment preserves body size and foot height. Equipment and shadows still need testing.",
             draft.first_person_enabled ? "Requested" : "Off", draft.body_alignment.alignment_enabled ? "On" : "Off",
             draft.body_alignment.body_backset, draft.body_alignment.body_side),
             {"Toggle body experiment", "Toggle alignment", "Body backset", "Body sideways", "Reset alignment", "Back"}, [this](auto b) {

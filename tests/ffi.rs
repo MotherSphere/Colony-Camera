@@ -11,7 +11,7 @@ fn abi_layout_is_fixed_width_and_padding_free() {
             size_of::<BodyAlignmentFrame>(),
             align_of::<BodyAlignmentFrame>()
         ),
-        (36, 4)
+        (52, 4)
     );
     assert_eq!(
         (

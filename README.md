@@ -1,10 +1,10 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.1 is a development candidate** with configurable
+CommonLibSSE-NG bridge. **0.2.2 is a development candidate** with configurable
 third-person transitions, native settings menus and an opt-in first-person body
-experiment. It adds adjustable horizontal body alignment to investigate poor
-first-person framing. It is not a complete SmoothCam or Improved Camera replacement.
+experiment. It corrects the model update phase and transform propagation used by
+first-person body alignment. It is not a complete SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
@@ -28,20 +28,29 @@ remain the published historical release; its tag and binary are unchanged.
   interface assets are required.
 
 The **first-person body experiment is off by default**. It attempts to display a
-conventional humanoid third-person body while retaining Skyrim's native camera
-and first-person arms. Head/third-person arm masking and equipment visibility
+conventional humanoid third-person body while retaining Skyrim's native camera.
+Sheathed ordinary movement uses body arms; drawn weapons or an equipped torch
+use native first-person arms. Head/third-person arm masking and equipment visibility
 are temporary, with restoration when the plugin still owns the changed values.
 Missing or replaced skeleton nodes cause a native fallback.
 
-User screenshots of 0.2.0 confirm body visibility, but the torso and shoulders
-occupy too much of the view. The 0.2.1 alignment attempts to place the body
-horizontally relative to the native eye and head, with adjustable backset and
-lateral offset. It does not rescale the body, shift it vertically or alter the
-native camera/FOV. **This framing correction is not yet visually validated.**
+User testing of 0.2.0 and 0.2.1 confirmed body visibility but rejected the framing.
+0.2.2 publishes the body after the native first-person model update, using a full
+transform pass with animation-controller advancement disabled. It aligns the
+body's eye landmark to the native eye when available, with a head fallback and
+adjustable backset/lateral offset. It checks the resulting world transforms and
+returns local bone scales to their native values immediately after publication.
+It does not rescale the body, shift it vertically or alter the native camera/FOV.
+**0.2.2 framing is not yet visually validated.**
+
+Improved Camera's default profile is the functional target, including its default
+absence of head bob. This candidate does not yet match its head visibility,
+camera/hands FOV, near-plane, scale/height adjustment or special-action policies.
+Successful transform read-back proves publication, not a 1:1 visual match.
 
 Alignment, collision, projectile origins, interiors, head/hair/helmet clipping,
 weapons, shields, torches, spell effects and shadows still require testing.
-Third-person arms, head-motion controls, independent hands FOV, near-plane adjustment and immersive
+Configurable third-person arm policies, head-motion controls, independent hands FOV, near-plane adjustment and immersive
 furniture/mount/transformation/death/killmove handling are not implemented.
 There is no dynamic crosshair, projectile-origin reconciliation, ballistic
 prediction, trajectory display or third-party preset import mapping. Aiming
@@ -111,7 +120,7 @@ moves it laterally (-20 to 20; positive is the player's right). Units are relati
 to skeleton scale 1. Unsafe positions or excessive translations retain native
 placement. Disable alignment to compare the previous framing while keeping the
 body experiment enabled. Save persists these settings; the native camera and
-first-person arms remain unchanged.
+native combat-arm transforms remain unchanged.
 
 | Profile setting | Meaning and accepted range |
 | --- | --- |
@@ -178,7 +187,7 @@ cmake --build build-cross --parallel 2
 
 That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
 Its Windows test executables require Windows or a separate Wine test prefix.
-The 0.2.1 cross-build is not yet verified.
+The 0.2.2 cross-build is not yet verified.
 
 Validate entry bytes, Address Library mappings and camera RTTI against a
 legitimate local game installation:
@@ -187,18 +196,19 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
-The 0.2.1 Windows x64 DLL compiled and passed export, load and null-SKSE rejection
-checks; configuration persistence and timing checks passed. Rust formatting and
-Clippy passed, along with 23 targeted tests: 8 alignment, 7 configuration, 3 FFI
-and 5 coordinator tests. Runtime verification passed 10 entry checks, two camera
-RTTI checks and five negative cases.
+The 0.2.2 Windows x64 DLL compiled. All 41 Rust tests, formatting and Clippy passed.
+Native ABI, configuration persistence and body-position/publication/arm-policy
+tests passed. Runtime verification passed 12 entry checks, two camera RTTI checks,
+one context-checked model call and seven negative cases.
 
-The full suite is **not green**: Windows Application Control blocked the existing
-15-test Rust camera target and the final native ABI, hook and body-position test
-executables. The unchanged ownership executable remains blocked and was not
-rerun. **0.2.1 visual alignment validation remains pending.** The 0.2.0 screenshots
-confirm body visibility and poor framing, not aiming, collision or compatibility
-correctness. Compilation cannot verify rendering.
+The full suite is **not green**: Windows blocked the hook-validation and timing
+test executables. It also blocked loading the new DLL; Code Integrity events
+3033/3077 identify its signing-policy rejection. Thus DLL loading and null-SKSE
+rejection are not validated for 0.2.2. The unchanged ownership executable remains
+previously blocked and was not retried. No security setting was changed.
+**0.2.2 visual alignment validation remains pending.** Earlier user tests confirm
+body visibility and poor framing, not aiming, collision or compatibility
+correctness. Compilation and static export checks cannot verify rendering.
 
 Before using a candidate broadly, check new/load game, repeated POV switching,
 walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transitions,
@@ -238,7 +248,9 @@ and intact notices. A local commit link is unavailable publicly until pushed.
 Sampled `PERF` logs separate first/third-person and enabled/disabled callback CPU
 work from the preceding hook chain, with collision, Rust and scene stages. Every
 sixteenth callback is sampled; reports include p50/p95/p99 of up to 64 sampled
-own-time values. These are callback samples, not complete-frame percentiles.
+own-time values. First-person samples cover the model callback and its preceding
+model-update chain; third-person samples cover the camera-state callback. These
+are callback samples, not complete-frame percentiles or comparable stage costs.
 The logs do not measure complete frame time, GPU body-render cost or unsampled
 worst-case spikes. Instrumentation overhead has not been calibrated.
 No fresh candidate FPS or compatibility benchmark is claimed. Compare native,

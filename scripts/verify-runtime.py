@@ -50,7 +50,8 @@ def verify(exe, database):
     header = (Path(__file__).resolve().parents[1] / "plugin/runtime.h").read_text()
     entries = re.findall(r'Entry (\w+)\{"\w+", (0x[0-9A-F]+), \{([^}]+)\}', header)
     expected = {"begin", "end", "update", "collision", "matrix",
-                "firstBegin", "firstEnd", "firstUpdate", "firstTranslation", "messageBox"}
+                "firstBegin", "firstEnd", "firstUpdate", "firstTranslation", "messageBox",
+                "sceneUpdate", "bodySceneUpdate"}
     require(len(entries) == len(expected) and {e[0] for e in entries} == expected,
             "Runtime header entry inventory differs from verifier")
     vtables = dict(re.findall(r'std::uintptr_t (\w+Vtable) = (0x[0-9A-F]+);', header))
@@ -66,7 +67,8 @@ def verify(exe, database):
         require((signature, offset, self_rva) == (1, 0, locator), f"{name}: invalid primary RTTI locator")
         type_name = f".?AV{class_name}@@\0".encode("ascii")
         require(read(descriptor+16, len(type_name)) == type_name, f"{name}: RTTI class mismatch")
-    direct_ids = {"collision": 50832, "matrix": 70641, "messageBox": 442726}
+    direct_ids = {"collision": 50832, "matrix": 70641, "messageBox": 442726,
+                  "sceneUpdate": 70251, "bodySceneUpdate": 40522}
     for name, rva_text, prefix_text in entries:
         rva = int(rva_text, 16)
         prefix = bytes(int(x, 16) for x in prefix_text.split(','))
@@ -83,7 +85,21 @@ def verify(exe, database):
             table = int(vtables["firstVtable" if first else "thirdVtable"], 16)
             require(struct.unpack("<Q", read(table+8*slot, 8))[0] == base+rva,
                     f"{name}: vtable slot mismatch")
+    call = re.search(r'SceneCall bodySceneCall\{(0x[0-9A-F]+), (0x[0-9A-F]+),\s*'
+                     r'\{([^}]+)\},\s*\{([^}]+)\}\};', header)
+    require(call is not None, "Missing first-person scene call metadata")
+    site, target = (int(call[i], 16) for i in (1, 2))
+    before, after = (bytes(int(x, 16) for x in call[i].split(',')) for i in (3, 4))
+    require(len(before) == 14 and len(after) == 12, "Scene call context size mismatch")
+    require(read(site-len(before), len(before), executable=True) == before
+            and read(site+5, len(after), executable=True) == after, "Scene call context mismatch")
+    instruction = read(site, 5, executable=True)
+    require(instruction[0] == 0xE8 and site+5+struct.unpack_from('<i', instruction, 1)[0] == target,
+            "Scene call instruction or target mismatch")
+    require(target == addresses[70251] and site == addresses[40522]+0xD7,
+            "Scene call Address Library owner/target mismatch")
     return {"runtime": "1.7.104.0", "entries_verified": len(entries),
+            "scene_calls_verified": 1,
             "rtti_vtables_verified": len(table_ids),
             "exe_sha256": hashlib.sha256(data).hexdigest(),
             "database_sha256": hashlib.sha256(db).hexdigest()}

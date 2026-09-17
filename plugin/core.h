@@ -40,6 +40,8 @@ struct BodyAlignmentFrame {
     float head[3]; // unsuppressed head world position, with previous body lease restored
     float heading[2]; // horizontal skeleton-forward XY; normalized in Rust, no pitch
     float scale; // cumulative unsuppressed skeleton world scale
+    float eye[3]; // actual unsuppressed 3P eye landmark when available
+    std::uint32_t eye_available; // 0=head fallback, 1=eye; other values rejected
 };
 struct BodyAlignmentOptions {
     std::uint32_t alignment_enabled;
@@ -48,7 +50,7 @@ struct BodyAlignmentOptions {
 };
 struct BodyAlignmentResult {
     float translation[3]; // world displacement; Z is always zero
-    float vertical_error; // camera Z minus head Z; diagnostics only
+    float vertical_error; // camera Z minus selected eye/head anchor Z; diagnostics only
     std::uint32_t valid; // zero means native fallback, never apply a partial result
 };
 struct CameraConfig {
@@ -94,7 +96,8 @@ struct CameraDecision {
 static_assert(std::is_standard_layout_v<CameraState> && std::is_trivially_copyable_v<CameraConfig>);
 static_assert(sizeof(CameraState) == 64 && sizeof(CameraFrame) == 40);
 static_assert(sizeof(CameraProfile) == 40 && sizeof(CameraConfig) == 320);
-static_assert(sizeof(BodyAlignmentFrame) == 36 && sizeof(BodyAlignmentOptions) == 12 && sizeof(BodyAlignmentResult) == 20);
+static_assert(sizeof(BodyAlignmentFrame) == 52 && sizeof(BodyAlignmentOptions) == 12 && sizeof(BodyAlignmentResult) == 20);
+static_assert(offsetof(BodyAlignmentFrame, eye) == 36 && offsetof(BodyAlignmentFrame, eye_available) == 48);
 static_assert(sizeof(CameraCoordinator) == 8 && sizeof(CameraContext) == 24 && sizeof(CameraDecision) == 24);
 static_assert(alignof(CameraState) == 4 && alignof(CameraConfig) == 4);
 static_assert(offsetof(CameraState, base) == 28 && offsetof(CameraProfile, offset_half_life) == 20);
