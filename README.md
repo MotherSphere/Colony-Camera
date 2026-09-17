@@ -142,7 +142,7 @@ Public [SmoothCam source](https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f
 was studied to understand deferred camera integration and publication to NiCamera.
 The CommonLib bridge is implemented in this project. Inspecting engine entry
 points does not establish in-game correctness or comprehensive compatibility.
-See [the verification record](docs/verification.md) for evidence and limitations.
+The checks described above do not replace in-game testing.
 
 When distributing the binary, provide this source link and the corresponding
 version, and retain the supplied license and third-party notices.
