@@ -19,6 +19,7 @@ import subprocess
 import tarfile
 import time
 import tomllib
+import uuid
 import zipfile
 
 
@@ -275,6 +276,33 @@ def write_zip(path, entries, epoch):
             raise PackageError(f"Archive contents changed: {path}")
 
 
+def rebuild(root, build_dir, cache, args, environment):
+    """Use a fresh Cargo target without deleting or trusting an existing cache.
+
+    Ninja can create a custom command's output parents before Cargo starts. Such
+    directories may lack Cargo's CACHEDIR.TAG and cannot safely be cargo-cleaned.
+    A new target avoids both that problem and incremental source ambiguity.
+    """
+    target = build_dir / f"package-cargo-{uuid.uuid4().hex}"
+    if target.exists() or target.is_symlink() or target.resolve().parent != build_dir.resolve():
+        raise PackageError("Could not select a fresh Cargo target inside the verified build directory")
+    previous = cache.get("CC_RUST_TARGET_DIR", str(build_dir / "cargo"))
+    configure = [args.cmake, "-S", str(root), "-B", str(build_dir),
+                 f"-DCC_RUST_TARGET_DIR:PATH={target.as_posix()}"]
+    restore = [args.cmake, "-S", str(root), "-B", str(build_dir),
+               f"-DCC_RUST_TARGET_DIR:PATH={previous}"]
+    build = [args.cmake, "--build", str(build_dir), "--config", args.config,
+             "--clean-first", "--parallel", str(args.jobs)]
+    try:
+        subprocess.run(configure, cwd=root, env=environment, check=True)
+        subprocess.run(build, cwd=root, env=environment, check=True)
+    finally:
+        # Keep the developer's selected target configuration on success or error.
+        # Both the original cache and the fresh build outputs remain available.
+        subprocess.run(restore, cwd=root, env=environment, check=True)
+    return {"configure": configure, "build": build, "restore": restore}
+
+
 def package(args, root=ROOT):
     root = root.resolve()
     revision = clean_revision(root)
@@ -296,12 +324,9 @@ def package(args, root=ROOT):
     cargo = cache.get("CARGO")
     if not cargo or cargo.endswith("-NOTFOUND"):
         raise PackageError("CMake cache does not identify the Cargo executable")
-    # Rebuild from clean outputs instead of trusting a stale or supplied DLL.
-    subprocess.run([cargo, "clean", "--target-dir", str(build_dir / "cargo")],
-                   cwd=root, env=environment, check=True)
-    build_command = [args.cmake, "--build", str(build_dir), "--config", args.config,
-                     "--clean-first", "--parallel", str(args.jobs)]
-    subprocess.run(build_command, cwd=root, env=environment, check=True)
+    # Rebuild from clean C++ outputs and an unused Rust target. Existing Cargo
+    # directories are never deleted or supplied with fabricated cache markers.
+    build_commands = rebuild(root, build_dir, cache, args, environment)
     binary = dll_path.read_bytes()
     validate_dll(binary, version)
     clean_revision(root, revision)
@@ -343,7 +368,7 @@ Publish the matching source download alongside any authorized binary release.
                 "cmake": command(args.cmake, "--version").decode().splitlines()[0],
                 "cpp_compiler": cache.get("CMAKE_CXX_COMPILER"),
                 "cmake_generator": cache.get("CMAKE_GENERATOR"),
-                "build_command": build_command,
+                "build_commands": build_commands,
                 "dll_sha256": hashlib.sha256(binary).hexdigest(),
                 "default_ini_sha256": hashlib.sha256(ini_before).hexdigest(),
                 "validation": "Clean build; x64 PE and SKSE exports; archive integrity. In-game validation pending."}

@@ -19,9 +19,10 @@ target_include_directories(CommonLibSSE PUBLIC "${COMMONLIB}/include" "${DEPS}/d
 target_compile_definitions(CommonLibSSE PUBLIC ENABLE_SKYRIM_SE=1 ENABLE_SKYRIM_AE=1 HAS_SKYRIM_MULTI_TARGETING=1 WINVER=0x0601 _WIN32_WINNT=0x0601 PRIVATE COMMONLIB_VERSION="7.5.2")
 target_link_libraries(CommonLibSSE PUBLIC spdlog::spdlog advapi32 bcrypt d3d11 d3dcompiler dbghelp dxgi ole32 version)
 target_precompile_headers(CommonLibSSE PRIVATE "${COMMONLIB}/include/SKSE/Impl/PCH.h")
-set(RUST_LIB "${CMAKE_CURRENT_BINARY_DIR}/cargo/x86_64-pc-windows-msvc/release/colony_camera.lib")
+set(CC_RUST_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargo" CACHE PATH "Cargo artifacts directory")
+set(RUST_LIB "${CC_RUST_TARGET_DIR}/x86_64-pc-windows-msvc/release/colony_camera.lib")
 add_custom_command(OUTPUT "${RUST_LIB}"
-    COMMAND ${CMAKE_COMMAND} -E env "RUSTFLAGS=-Ctarget-feature=+crt-static" ${CARGO} build --locked --release --target x86_64-pc-windows-msvc --target-dir "${CMAKE_CURRENT_BINARY_DIR}/cargo"
+    COMMAND ${CMAKE_COMMAND} -E env "RUSTFLAGS=-Ctarget-feature=+crt-static" ${CARGO} build --locked --release --target x86_64-pc-windows-msvc --target-dir "${CC_RUST_TARGET_DIR}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     DEPENDS src/lib.rs src/config.rs src/coordinator.rs Cargo.toml Cargo.lock VERBATIM)
 add_custom_target(camera_rust DEPENDS "${RUST_LIB}")

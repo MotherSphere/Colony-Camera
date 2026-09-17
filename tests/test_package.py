@@ -95,7 +95,8 @@ class PackageTests(unittest.TestCase):
                                        rustc="fixture-rustc", cmake="fixture-cmake", jobs=2)
 
     def configure(self, generator):
-        text = f"CMAKE_HOME_DIRECTORY:INTERNAL={self.root.as_posix()}\nCARGO:FILEPATH=fixture-cargo\n"
+        text = (f"CMAKE_HOME_DIRECTORY:INTERNAL={self.root.as_posix()}\nCARGO:FILEPATH=fixture-cargo\n"
+                f"CC_RUST_TARGET_DIR:PATH={(self.build / 'cargo').as_posix()}\n")
         text += ("CMAKE_CONFIGURATION_TYPES:STRING=Debug;Release;RelWithDebInfo\n" if generator == "multi"
                  else "CMAKE_BUILD_TYPE:STRING=Release\n")
         write(self.build / "CMakeCache.txt", text)
@@ -114,7 +115,7 @@ class PackageTests(unittest.TestCase):
         def build(args, **kwargs):
             if args[0] not in {"fixture-cmake", "fixture-cargo"}:
                 return original_run(args, **kwargs)
-            if args[0] == "fixture-cmake":
+            if args[0] == "fixture-cmake" and "--build" in args:
                 path = self.build / "Release/ColonyCamera.dll"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(pe_fixture())
@@ -133,8 +134,10 @@ class PackageTests(unittest.TestCase):
             output = packaging.package(self.args, self.root)
         calls = [call.args[0] for call in builder.call_args_list
                  if call.args[0][0] in {"fixture-cmake", "fixture-cargo"}]
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         self.assertIn("--clean-first", calls[1])
+        self.assertIn("package-cargo-", calls[0][-1])
+        self.assertEqual(calls[2][-1], f"-DCC_RUST_TARGET_DIR:PATH={(self.build / 'cargo').as_posix()}")
         self.assertEqual(ini.read_bytes(), before)
         self.assertEqual(installed.read_text(), "User configuration must survive\n")
         prefix = f"Camera-Colony-1.2.3-{self.revision[:12]}"
@@ -192,6 +195,32 @@ class PackageTests(unittest.TestCase):
             with self.assertRaisesRegex(packaging.PackageError, "source changes"):
                 packaging.package(self.args, self.root)
         self.assertFalse(self.args.output.exists())
+
+    def test_fresh_rust_target_preserves_unmarked_cache_and_restores_after_failure(self):
+        original_target = self.build / "cargo"
+        original_target.mkdir()
+        sentinel = original_target / "user-owned-sentinel"
+        sentinel.write_bytes(b"preserve existing cache")
+        cache, _ = packaging.build_cache(self.root, self.build, "Release")
+        calls = []
+
+        def fail_build(args, **kwargs):
+            calls.append(args)
+            if "--build" in args:
+                raise subprocess.CalledProcessError(1, args)
+            return subprocess.CompletedProcess(args, 0)
+
+        with patch.object(packaging.subprocess, "run", side_effect=fail_build):
+            with self.assertRaises(subprocess.CalledProcessError):
+                packaging.rebuild(self.root, self.build, cache, self.args, {})
+        self.assertEqual(len(calls), 3)
+        selected = Path(calls[0][-1].split("=", 1)[1])
+        self.assertEqual(selected.parent, self.build)
+        self.assertFalse(selected.exists())
+        self.assertEqual(calls[-1][-1], f"-DCC_RUST_TARGET_DIR:PATH={original_target.as_posix()}")
+        self.assertEqual(sentinel.read_bytes(), b"preserve existing cache")
+        self.assertFalse((original_target / "CACHEDIR.TAG").exists())
+        self.assertFalse(any(args[0] == "fixture-cargo" for args in calls))
 
     def test_source_links_cannot_escape_dependency_tree(self):
         def source_link(target):
