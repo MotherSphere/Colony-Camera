@@ -1,0 +1,71 @@
+[b]Description[/b]
+
+Colony Camera est un mod indépendant de caméra à la troisième personne pour Skyrim Special Edition, conçu pour rendre les déplacements de la caméra plus progressifs tout en conservant les mécanismes du jeu.
+
+Il ajoute un lissage de position, des décalages personnalisables et un changement d’épaule. Trois profils permettent de régler séparément l’exploration, les déplacements avec une arme dégainée et la visée.
+
+Cette première version est une alpha fonctionnelle. Son fonctionnement a été observé en jeu sous Proton, dans une installation utilisant Improved Camera, True Directional Movement et SkyParkour. Cela ne constitue pas une garantie de compatibilité avec toutes les configurations ou toutes les animations de ces mods.
+
+Colony Camera est un projet distinct de SmoothCam. Il ne nécessite pas SmoothCam et ne reprend pas l’ensemble de ses fonctionnalités. Cette version ne propose pas de menu MCM, de réticule personnalisé, de prédiction de trajectoire ni d’import de presets SmoothCam.
+
+[b]Installation instructions[/b]
+
+[list]
+[*]Fermez Skyrim et sauvegardez votre configuration de caméra.
+[*]Installez les prérequis indiqués ci-dessous pour votre version exacte du jeu.
+[*]Désactivez SmoothCam et les autres remplaçants complets de la caméra à la troisième personne avant d’activer Colony Camera. Si SmoothCam.dll est chargé, Colony Camera reste inactif.
+[*]Installez l’archive avec votre gestionnaire de mods. Si celui-ci demande de choisir le dossier de données, sélectionnez « Colony Camera 0.1.2 alpha », le dossier contenant SKSE.
+[*]Vérifiez que le mod fournit SKSE/Plugins/ColonyCamera.dll et SKSE/Plugins/ColonyCamera.ini. Aucun ESP ou ESL n’est à activer.
+[*]Lancez le jeu via SKSE, chargez une sauvegarde ou commencez une partie, puis passez en troisième personne. L’installation des interceptions de caméra attend le chargement de la partie.
+[*]Testez les déplacements, les passages étroits, la visée et les changements de perspective avant de conserver vos réglages.
+[/list]
+
+Les paramètres se trouvent dans SKSE/Plugins/ColonyCamera.ini. Vous pouvez modifier ce fichier puis utiliser Ctrl+F10 pour le recharger en jeu. Une configuration invalide est refusée et les paramètres précédents sont conservés.
+
+Pour une installation manuelle, copiez le dossier SKSE du mod dans le dossier Data de Skyrim. Pour désinstaller, fermez le jeu puis désactivez le mod dans votre gestionnaire ou retirez uniquement ColonyCamera.dll et ColonyCamera.ini.
+
+En cas de problème, consultez ColonyCamera.log dans Documents/My Games/Skyrim Special Edition/SKSE. Sous Proton, ce chemin se trouve dans le préfixe Windows du jeu. Joignez ce journal à votre signalement avec les versions de Skyrim, SKSE et vos autres mods de caméra.
+
+[b]Main features[/b]
+
+[list]
+[*]Lissage progressif de la position, calculé en fonction du temps écoulé plutôt que d’un nombre fixe d’images.
+[*]Limitation de la distance de retard pour éviter que la caméra reste trop éloignée de sa position cible.
+[*]Profils distincts pour l’exploration, le combat avec arme dégainée et la visée.
+[*]Réglages supplémentaires de position horizontale, de profondeur et de hauteur dans l’espace de la caméra.
+[*]Changement d’épaule avec Ctrl+F9.
+[*]Activation ou désactivation avec Ctrl+F8 pour comparer avec la caméra native.
+[*]Rechargement de la configuration avec Ctrl+F10, sans redémarrer le jeu.
+[*]Collision native appliquée après le lissage, avant la publication de la position finale.
+[*]Réinitialisation du lissage lors des chargements, changements de cellule, téléportations importantes et interruptions prolongées.
+[*]Première personne, montures, dialogues et états non pris en charge laissés au jeu.
+[/list]
+
+Par défaut, les décalages supplémentaires sont nuls : l’effet principal est le lissage. Le profil de visée conserve la position native sans lissage supplémentaire pour préserver l’alignement du réticule. Modifier ce profil peut changer la précision de visée.
+
+Dans l’INI, x, y et z règlent les décalages. half_life contrôle le temps nécessaire pour réduire de moitié l’écart restant ; max_lag fixe le retard maximal en unités du jeu. Les raccourcis clavier sont configurables. Les changements d’activation et d’épaule effectués au clavier ne sont pas enregistrés dans l’INI.
+
+[b]Requirements[/b]
+
+[list]
+[*]Skyrim Special Edition, édition Steam, exécutable 1.7.104.0. Cette DLL cible uniquement cette version et refuse les autres runtimes.
+[*]SKSE64 2.3.1 correspondant à Skyrim 1.7.104.0.
+[*]Address Library for SKSE Plugins avec les données pour 1.7.104.0.
+[*]Un environnement Windows x64 ou une installation Proton compatible. L’essai sous Proton ne garantit pas toutes les distributions ou configurations.
+[/list]
+
+Aucune prise en charge de Skyrim VR, des anciens runtimes ou de la version GOG n’est annoncée pour cette alpha. SkyUI, un ESP et des scripts Papyrus ne sont pas nécessaires. CommonLibSSE-NG est intégré à la compilation : vous n’avez pas à l’installer séparément pour jouer.
+
+Improved Camera peut rester actif. La coexistence avec d’autres extensions de caméra doit être vérifiée dans votre installation, particulièrement pour les animations spéciales et les changements de perspective. Aucun gain de FPS ni absence totale d’impact sur les performances n’est promis.
+
+[b]Shout outs[/b]
+
+Merci à l’équipe SKSE pour l’extension du moteur et aux auteurs d’Address Library pour les données de correspondance entre versions.
+
+Merci à alandtse et aux contributeurs de CommonLibSSE-NG pour la bibliothèque utilisée par la passerelle C++.
+
+Merci à mwilsnd pour son travail sur SmoothCam, dont les sources publiques ont servi de référence pour comprendre le raccordement au système de caméra. Aucun fichier de code, asset, menu ou preset SmoothCam n’est inclus dans Colony Camera.
+
+Merci aux contributeurs de Rust, spdlog, DirectXMath et DirectXTK. Les notices et les sources accompagnant cette version sont incluses dans l’archive.
+
+Colony Camera est un projet de MotherSphere. Merci aux utilisateurs qui testent cette alpha et fournissent des journaux et des retours précis.
