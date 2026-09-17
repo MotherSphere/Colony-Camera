@@ -9,6 +9,15 @@ bool Close(const RE::NiPoint3& a, const RE::NiPoint3& b) {
         std::abs(a.z-b.z) < 0.0001f;
 }
 struct Node { Node* parent = nullptr; };
+RE::NiMatrix3 NoRollView(float yaw, float pitch) {
+    const float s = std::sin(yaw), c = std::cos(yaw);
+    const float p = std::sin(pitch), q = std::cos(pitch);
+    RE::NiMatrix3 rotation;
+    rotation.entry[0][0] = s*q; rotation.entry[0][1] = -s*p; rotation.entry[0][2] = c;
+    rotation.entry[1][0] = c*q; rotation.entry[1][1] = -c*p; rotation.entry[1][2] = -s;
+    rotation.entry[2][0] = p; rotation.entry[2][1] = q; rotation.entry[2][2] = 0;
+    return rotation;
+}
 }
 
 int main() {
@@ -19,18 +28,42 @@ int main() {
     for (float yaw : {0.0f, 0.7f, 1.57079633f, 3.14159265f, -1.2f}) {
         for (float pitch : {0.0f, 0.8f, -1.1f, 1.57079633f, -1.57079633f}) {
             const float s = std::sin(yaw), c = std::cos(yaw);
-            const float p = std::sin(pitch), q = std::cos(pitch);
-            viewRotation.entry[0][0] = s*q; viewRotation.entry[0][1] = -s*p; viewRotation.entry[0][2] = c;
-            viewRotation.entry[1][0] = c*q; viewRotation.entry[1][1] = -c*p; viewRotation.entry[1][2] = -s;
-            viewRotation.entry[2][0] = p; viewRotation.entry[2][1] = q; viewRotation.entry[2][2] = 0;
+            viewRotation = NoRollView(yaw, pitch);
             assert(body_position::ViewHeading(viewRotation, heading));
             assert(std::abs(heading[0]-s) < 0.0001f && std::abs(heading[1]-c) < 0.0001f);
         }
+        // Cross both vertical poles and the previous projected-forward fallback
+        // threshold at about 90.0573 degrees. A default 12-unit backset must not
+        // jump by 24 units as the camera moves another hundredth of a degree.
+        for (float sign : {-1.0f, 1.0f}) {
+            RE::NiPoint3 previousOffset{};
+            for (int step = -20; step <= 20; ++step) {
+                const float pitch = sign * (1.57079633f + step * 0.000174532925f);
+                viewRotation = NoRollView(yaw, pitch);
+                assert(body_position::ViewHeading(viewRotation, heading));
+                const RE::NiPoint3 offset{-12*heading[0], -12*heading[1], 0};
+                assert(Close(offset, {-12*std::sin(yaw), -12*std::cos(yaw), 0}));
+                if (step > -20) assert(Close(offset, previousOffset));
+                previousOffset = offset;
+            }
+        }
     }
+
+    // A rolled basis can put screen-right vertically. The explicit fallback is
+    // then the horizontal forward direction; this is not a general roll-removal
+    // guarantee. Identity has forward +X and screen-right +Z in NiCamera's basis.
+    viewRotation = RE::NiMatrix3{};
+    assert(body_position::ViewHeading(viewRotation, heading));
+    assert(heading[0] == 1 && heading[1] == 0);
     const auto previousHeading = heading;
     viewRotation.entry[2][2] = std::numeric_limits<float>::quiet_NaN();
     assert(!body_position::ViewHeading(viewRotation, heading) && heading == previousHeading);
+    viewRotation = NoRollView(0.7f, 0.8f);
+    viewRotation.entry[0][2] = std::numeric_limits<float>::infinity();
+    assert(!body_position::ViewHeading(viewRotation, heading) && heading == previousHeading);
     for (auto& row : viewRotation.entry) for (auto& value : row) value = 0;
+    assert(!body_position::ViewHeading(viewRotation, heading) && heading == previousHeading);
+    viewRotation.entry[0][0] = 0.0005f;
     assert(!body_position::ViewHeading(viewRotation, heading) && heading == previousHeading);
 
     // Sheathed idle preserves full body arms; fists/weapons readied and an

@@ -11,15 +11,18 @@
 namespace body_position {
 // NiCamera's published basis uses column 0 for depth and column 2 for screen X.
 // Verified from the native world-to-camera matrix routine on the target runtime.
-// Near vertical, screen-right still determines horizontal yaw without dividing
-// by a vanishing forward projection. On failure leave the caller's output alone.
+// For ordinary native views without roll, screen-right keeps the same horizontal
+// yaw across vertical pitch. Projected forward reverses beyond that pole. Prefer
+// right consistently; use forward only when right has no usable XY projection.
+// This defines a screen-right policy, not equivalent yaw for arbitrary rolled
+// camera rigs. On failure leave the caller's output alone.
 inline bool ViewHeading(const RE::NiMatrix3& rotation, std::array<float, 2>& result) {
     for (const auto& row : rotation.entry)
         for (float value : row) if (!std::isfinite(value)) return false;
-    float x = rotation.entry[0][0], y = rotation.entry[1][0];
+    float x = -rotation.entry[1][2], y = rotation.entry[0][2];
     float length = std::hypot(x, y);
     if (length < 0.001f) {
-        x = -rotation.entry[1][2]; y = rotation.entry[0][2];
+        x = rotation.entry[0][0]; y = rotation.entry[1][0];
         length = std::hypot(x, y);
     }
     if (!std::isfinite(length) || length < 0.001f) return false;

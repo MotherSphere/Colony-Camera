@@ -1,10 +1,10 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.3 is a development candidate** with configurable
+CommonLibSSE-NG bridge. **0.2.4 is a development candidate** with configurable
 third-person transitions, native settings menus and an opt-in first-person body
-experiment. It aligns the first-person body to the final rendered view during
-movement and provides independent perspective switches. It is not a complete
+experiment. It fixes a body-offset direction reversal near vertical camera views
+and records first-person publication outcomes. It is not a complete
 SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
@@ -47,8 +47,26 @@ Alignment prefers the body's eye landmark with a head fallback and adjustable
 backset/lateral offset. A full transform pass with controller advancement disabled
 checks resulting world transforms, then returns temporary local values to native
 values. Body scale and height and native camera/FOV remain unchanged.
-**0.2.3 motion correction is not yet visually validated.** The animated torso can
-still move relative to its eye landmark; height/projection/mesh clipping is separate.
+User testing of 0.2.3 reports intermittent torso intrusion during camera turns;
+small movement-only steps appear unaffected. Startup was subsequently confirmed
+working. 0.2.4 fixes a demonstrated heading discontinuity: projected camera-forward
+reversed beyond approximately 90.057 degrees, moving the default body backset by
+24 units. Heading now consistently uses projected screen-right, with a forward
+fallback only when that projection degenerates. Continuity across vertical is
+verified mathematically for native views without roll; arbitrary rolling camera
+rigs have no equivalent guarantee. Native actor pitch is clamped, but the final
+view also adds the camera bone's orientation without another pitch clamp.
+**This defect has not been established as the user's remaining visual cause.**
+The animated torso can still move relative to its eye landmark. Native body tilt,
+height, projection and mesh clipping remain separate; no body rotation is forced.
+
+While the body experiment is enabled, `First-person motion window` log lines
+count applied, native-fallback, not-ready and rejected publications separately
+for model and camera passes. Reports are limited to one per two seconds per pass.
+They include the latest rejection/fallback codes, view pitch/heading, body forward
+axis and alignment sample. This covers early exits that previously bypassed the
+status-change log. These are callback counts, not rendered-frame counts; a quiet
+or successful report still does not prove visual correctness.
 
 Improved Camera's default profile is the functional target, including its default
 absence of head bob. This candidate does not yet match its head visibility,
@@ -197,7 +215,7 @@ cmake --build build-cross --parallel 2
 
 That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
 Its Windows test executables require Windows or a separate Wine test prefix.
-The 0.2.3 cross-build is not yet verified.
+The 0.2.4 cross-build is not yet verified.
 
 Validate entry bytes, Address Library mappings and camera RTTI against a
 legitimate local game installation:
@@ -206,20 +224,21 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
-The 0.2.3 Windows x64 DLL and test targets compiled. Rust formatting and Clippy
-passed. Native ownership and timing tests passed. New regressions cover independent
-perspective switches, configuration migration, final-view versus raw-eye motion,
-and camera heading through yaw and vertical pitch. Their execution was blocked
-by Windows Application Control, as were the native ABI, persistence, hook and
-body-position targets. The full Rust run stopped before executing tests (4551).
+The 0.2.4 Windows x64 DLL and targeted native test executable compiled. The new
+regression sweeps 410 camera orientations through both vertical poles, including
+the former forward-projection threshold; ordinary views, fallback and invalid
+inputs are covered too. Windows Application Control blocked both the canonical
+body-position test and DLL-load test host before launch. Fresh Code Integrity
+event 3077 confirms the signing-policy rejection. These tests did **not** execute,
+and the 0.2.4 DLL was not dynamically loaded locally. No alternate executable or
+security-policy change was used to circumvent the block.
 
-The full suite is **not green**. Windows also blocked loading the new DLL; fresh
-Code Integrity event 3077 identifies its signing-policy rejection. DLL loading,
-null-SKSE rejection and the new regressions remain unvalidated for 0.2.3. No
-security setting was changed or alternate executable used. Runtime verification
-passed 14 entry checks, two camera RTTI checks, both context-checked model/camera
-calls and 15 negative cases. **Visual motion validation remains pending.**
-Compilation and static export checks cannot verify rendering or compatibility.
+The full suite is **not green**. The previous runtime verification covered 14
+entries, two camera RTTI tables, both guarded callsites and 15 negative cases;
+this revision changes none of those hooks, runtime addresses or ABI layouts.
+Rust algorithms and settings are unchanged. Prior revision test passes do not
+validate this candidate. **Visual motion validation remains pending.** Compilation
+and static export checks cannot verify rendering or compatibility.
 
 Before using a candidate broadly, check new/load game, repeated POV switching,
 walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transitions,
