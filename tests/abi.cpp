@@ -59,6 +59,20 @@ int main() {
     }
     auto c = cc_defaults();
     assert(c.enabled == 1 && c.keys[0] == 0x42);
+    assert(c.first_person_enabled == 0 && c.body_alignment.alignment_enabled == 1);
+    assert(c.body_alignment.body_backset == 12 && c.body_alignment.body_side == 0);
+    BodyAlignmentFrame body{{0,0,130},{0,0,125},{0,2},1};
+    auto alignment = cc_align_body(body, c.body_alignment);
+    assert(alignment.valid == 1 && alignment.translation[0] == 0 && alignment.translation[1] == -12);
+    assert(alignment.translation[2] == 0 && alignment.vertical_error == 5);
+    auto bodyOptions = c.body_alignment;
+    bodyOptions.body_side = 4;
+    body.scale = 2;
+    alignment = cc_align_body(body, bodyOptions);
+    assert(alignment.valid == 1 && alignment.translation[0] == 8 && alignment.translation[1] == -24);
+    body.camera[0] = 1000;
+    alignment = cc_align_body(body, bodyOptions);
+    assert(alignment.valid == 0 && alignment.translation[0] == 0 && alignment.translation[1] == 0);
     CameraFrame f{{100,200,300},{1,0,0,0},0.016f,1,75};
     auto s = cc_step({}, f, c.profiles[0]);
     assert(s.initialized == 1 && s.position[0] == 100 && s.position[2] == 300);

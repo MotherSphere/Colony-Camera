@@ -49,14 +49,14 @@ fn canonical_settings_roundtrip_every_profile_and_opt_in_field() {
     assert_eq!(c.profiles[SPRINT as usize].offset_half_life, 0.1);
     assert_eq!(c.first_person_enabled, 1);
     let text = serialize_config(&c).unwrap();
-    assert!(text.contains("format_version=2"));
+    assert!(text.contains("format_version=3"));
     assert_eq!(parse_config(&text).unwrap(), c);
 }
 
 #[test]
 fn rejects_new_invalid_values_without_silently_accepting_typos() {
     for text in [
-        "[general]\nformat_version=3",
+        "[general]\nformat_version=4",
         "[general]\nmenu_key=66",
         "[sprint]\nactive=1",
         "[first_person]\nenabled=1",
@@ -67,4 +67,53 @@ fn rejects_new_invalid_values_without_silently_accepting_typos() {
     ] {
         assert!(parse_config(text).is_err(), "{text}");
     }
+}
+
+#[test]
+fn legacy_body_experiment_gets_alignment_without_changing_enablement_or_bindings() {
+    for version in [1, 2, 3] {
+        let text = format!("[general]\nformat_version={version}\ntoggle_key=80\nshoulder_key=81\nreload_key=82\nmenu_key=83\n[first_person]\nenabled=true");
+        let config = parse_config(&text).unwrap();
+        assert_eq!(config.first_person_enabled, 1);
+        assert_eq!(config.keys, [80, 81, 82]);
+        assert_eq!(config.menu_key, 83);
+        assert_eq!(
+            config.body_alignment,
+            colony_camera::BodyAlignmentOptions::default()
+        );
+        assert_eq!(config.body_alignment.alignment_enabled, 1);
+    }
+    let old_off = parse_config("[first_person]\nenabled=false").unwrap();
+    assert_eq!(old_off.first_person_enabled, 0);
+    assert_eq!(colony_camera::Config::default().first_person_enabled, 0);
+}
+
+#[test]
+fn body_alignment_options_roundtrip_and_reject_invalid_values() {
+    let config = parse_config("[first_person]\nenabled=true\nalignment_enabled=false\nbody_backset=27.125\nbody_side=-9.5").unwrap();
+    assert_eq!(config.body_alignment.alignment_enabled, 0);
+    assert_eq!(config.body_alignment.body_backset, 27.125);
+    assert_eq!(config.body_alignment.body_side, -9.5);
+    let text = colony_camera::serialize_config(&config).unwrap();
+    assert!(text.contains("format_version=3"));
+    assert_eq!(parse_config(&text).unwrap(), config);
+    for value in [
+        "alignment_enabled=1",
+        "body_backset=-1",
+        "body_backset=41",
+        "body_backset=NaN",
+        "body_side=-21",
+        "body_side=21",
+        "body_side=inf",
+        "body_forward=12",
+    ] {
+        assert!(
+            parse_config(&format!("[first_person]\n{value}")).is_err(),
+            "{value}"
+        );
+    }
+    let mut invalid = config;
+    invalid.body_alignment.body_backset = f32::NAN;
+    assert!(!invalid.valid());
+    assert!(colony_camera::serialize_config(&invalid).is_err());
 }

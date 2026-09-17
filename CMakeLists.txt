@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ColonyCamera VERSION 0.2.0 LANGUAGES CXX)
+project(ColonyCamera VERSION 0.2.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
@@ -24,7 +24,7 @@ set(RUST_LIB "${CC_RUST_TARGET_DIR}/x86_64-pc-windows-msvc/release/colony_camera
 add_custom_command(OUTPUT "${RUST_LIB}"
     COMMAND ${CMAKE_COMMAND} -E env "RUSTFLAGS=-Ctarget-feature=+crt-static" ${CARGO} build --locked --release --target x86_64-pc-windows-msvc --target-dir "${CC_RUST_TARGET_DIR}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    DEPENDS src/lib.rs src/config.rs src/coordinator.rs Cargo.toml Cargo.lock VERBATIM)
+    DEPENDS src/lib.rs src/config.rs src/coordinator.rs src/first_person.rs Cargo.toml Cargo.lock VERBATIM)
 add_custom_target(camera_rust DEPENDS "${RUST_LIB}")
 add_library(ColonyCamera SHARED plugin/main.cpp)
 add_dependencies(ColonyCamera camera_rust)
@@ -55,3 +55,7 @@ target_compile_options(camera_hook_validation PRIVATE /UNDEBUG)
 add_test(NAME camera_hook_validation COMMAND camera_hook_validation)
 add_executable(camera_timing tests/timing.cpp)
 add_test(NAME camera_timing COMMAND camera_timing)
+add_executable(camera_body_position tests/body_position.cpp)
+target_link_libraries(camera_body_position PRIVATE CommonLibSSE)
+target_compile_options(camera_body_position PRIVATE /UNDEBUG)
+add_test(NAME camera_body_position COMMAND camera_body_position)

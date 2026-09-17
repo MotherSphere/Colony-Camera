@@ -1,9 +1,10 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.0 is a development candidate**, adding configurable
+CommonLibSSE-NG bridge. **0.2.1 is a development candidate** with configurable
 third-person transitions, native settings menus and an opt-in first-person body
-experiment. It is not a complete SmoothCam or Improved Camera replacement.
+experiment. It adds adjustable horizontal body alignment to investigate poor
+first-person framing. It is not a complete SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
@@ -32,9 +33,15 @@ and first-person arms. Head/third-person arm masking and equipment visibility
 are temporary, with restoration when the plugin still owns the changed values.
 Missing or replaced skeleton nodes cause a native fallback.
 
-Body alignment, interiors, head/hair/helmet clipping, weapons, shields, torches,
-spell effects and shadows still need visual validation. Third-person arms,
-head-motion controls, independent hands FOV, near-plane adjustment and immersive
+User screenshots of 0.2.0 confirm body visibility, but the torso and shoulders
+occupy too much of the view. The 0.2.1 alignment attempts to place the body
+horizontally relative to the native eye and head, with adjustable backset and
+lateral offset. It does not rescale the body, shift it vertically or alter the
+native camera/FOV. **This framing correction is not yet visually validated.**
+
+Alignment, collision, projectile origins, interiors, head/hair/helmet clipping,
+weapons, shields, torches, spell effects and shadows still require testing.
+Third-person arms, head-motion controls, independent hands FOV, near-plane adjustment and immersive
 furniture/mount/transformation/death/killmove handling are not implemented.
 There is no dynamic crosshair, projectile-origin reconciliation, ballistic
 prediction, trajectory display or third-party preset import mapping. Aiming
@@ -89,11 +96,22 @@ temporary file, then replacing the INI while keeping its previous version as
 in the backup. Reload rejects malformed files and retains active settings.
 Closing the menu alone does not save changes. Shoulder choice is session-only.
 
-INI format 2 accepts older configurations without enabling new locomotion or
-first-person behavior. Missing `offset_half_life` inherits an explicitly supplied
+INI format 3 accepts formats 1 and 2, preserving bindings and the existing
+first-person enabled state. Missing alignment fields use the new defaults;
+the body experiment remains off in a fresh configuration. Missing locomotion
+sections remain inactive. Missing `offset_half_life` inherits an explicitly supplied
 legacy `half_life`. Existing key remaps are retained; if an older binding already
 uses F7, an unused menu key is chosen. Unknown/duplicate fields, conflicting keys,
 non-finite numbers and out-of-range values reject the entire file.
+
+First Person provides the body toggle, an alignment toggle and numeric backset/
+lateral controls. In `[first_person]`, `alignment_enabled=true` requests horizontal
+alignment, `body_backset=12` moves the body backward (0-40), and `body_side=0`
+moves it laterally (-20 to 20; positive is the player's right). Units are relative
+to skeleton scale 1. Unsafe positions or excessive translations retain native
+placement. Disable alignment to compare the previous framing while keeping the
+body experiment enabled. Save persists these settings; the native camera and
+first-person arms remain unchanged.
 
 | Profile setting | Meaning and accepted range |
 | --- | --- |
@@ -160,7 +178,7 @@ cmake --build build-cross --parallel 2
 
 That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
 Its Windows test executables require Windows or a separate Wine test prefix.
-The 0.2.0 cross-build is not yet verified.
+The 0.2.1 cross-build is not yet verified.
 
 Validate entry bytes, Address Library mappings and camera RTTI against a
 legitimate local game installation:
@@ -169,11 +187,18 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
-The target executable/database pair passed all nine entry checks and two camera
-vtable RTTI checks. The candidate Windows x64 DLL built and loaded in the standalone
-harness. Rust tests, ABI, persistence, hook-guard, sampled-timing and packaging
-checks passed. **In-game menus, camera visuals and compatibility remain pending
-validation.** Runtime signatures and compilation cannot verify rendering.
+The 0.2.1 Windows x64 DLL compiled and passed export, load and null-SKSE rejection
+checks; configuration persistence and timing checks passed. Rust formatting and
+Clippy passed, along with 23 targeted tests: 8 alignment, 7 configuration, 3 FFI
+and 5 coordinator tests. Runtime verification passed 10 entry checks, two camera
+RTTI checks and five negative cases.
+
+The full suite is **not green**: Windows Application Control blocked the existing
+15-test Rust camera target and the final native ABI, hook and body-position test
+executables. The unchanged ownership executable remains blocked and was not
+rerun. **0.2.1 visual alignment validation remains pending.** The 0.2.0 screenshots
+confirm body visibility and poor framing, not aiming, collision or compatibility
+correctness. Compilation cannot verify rendering.
 
 Before using a candidate broadly, check new/load game, repeated POV switching,
 walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transitions,

@@ -132,8 +132,34 @@ class Menu {
         });
     }
     void FirstPerson() {
-        Page(std::format("First Person\nExperimental body visibility: {}\nNative camera and native arms are retained. Indoor visibility, equipment clipping, animation and shadows require visual testing. Special states use native behavior.", draft.first_person_enabled ? "Requested" : "Off"),
-            {"Toggle body experiment", "Back"}, [this](auto b) { if (b == 0) { draft.first_person_enabled ^= 1; CommitDraft(); FirstPerson(); } else Root(); });
+        Page(std::format("First Person\nBody experiment: {}  Alignment: {}\nBody backset: {:.1f}  Sideways: {:.1f}\nAlignment places the body behind the native eye without resizing it or changing foot height. Native camera and hands are retained. Equipment and shadows still need testing.",
+            draft.first_person_enabled ? "Requested" : "Off", draft.body_alignment.alignment_enabled ? "On" : "Off",
+            draft.body_alignment.body_backset, draft.body_alignment.body_side),
+            {"Toggle body experiment", "Toggle alignment", "Body backset", "Body sideways", "Reset alignment", "Back"}, [this](auto b) {
+                if (b == 0) { draft.first_person_enabled ^= 1; CommitDraft(); FirstPerson(); }
+                else if (b == 1) { draft.body_alignment.alignment_enabled ^= 1; CommitDraft(); FirstPerson(); }
+                else if (b == 2 || b == 3) BodyNumber(b - 2);
+                else if (b == 4) { draft.body_alignment = cc_defaults().body_alignment; CommitDraft(); FirstPerson(); }
+                else Root();
+            });
+    }
+    void BodyNumber(unsigned field) {
+        const auto value = field == 0 ? draft.body_alignment.body_backset : draft.body_alignment.body_side;
+        Page(std::format("{}: {:.1f}\n{}\nDistances scale with the body. Alignment must be on. Changes apply after closing the menu; Save settings keeps them for the next session.",
+            field == 0 ? "Body backset" : "Body sideways", value,
+            field == 0 ? "0..40: higher values move the body farther behind your eye, reducing torso obstruction when looking down."
+                       : "-20..20: positive moves the body to your right; negative moves it left."),
+            {"Decrease", "Increase", "Decrease x5", "Increase x5", "Default", "Back"}, [this, field](auto b) {
+                if (b > 4) { FirstPerson(); return; }
+                auto candidate = draft;
+                auto& number = field == 0 ? candidate.body_alignment.body_backset : candidate.body_alignment.body_side;
+                const float deltas[] = {-1, 1, -5, 5};
+                const auto defaults = cc_defaults();
+                if (b == 4) number = field == 0 ? defaults.body_alignment.body_backset : defaults.body_alignment.body_side;
+                else number += deltas[b];
+                if (!cc_validate_config(&candidate)) { draft = candidate; CommitDraft(); }
+                BodyNumber(field);
+            });
     }
     void Presets() {
         Page("Presets\nOur own .ccpreset format. Export and import use Data/SKSE/Plugins/ColonyCamera/Presets. Import preserves your keyboard bindings. No external preset mapping is provided.",

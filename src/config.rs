@@ -1,5 +1,8 @@
 //! Atomic configuration parsing, validation and canonical own-format persistence.
-use crate::{Profile, AIM, AIRBORNE, COMBAT, LOCOMOTION_MASK, PROFILE_COUNT, SNEAK, SPRINT, SWIM};
+use crate::{
+    BodyAlignmentOptions, Profile, AIM, AIRBORNE, COMBAT, LOCOMOTION_MASK, PROFILE_COUNT, SNEAK,
+    SPRINT, SWIM,
+};
 use std::fmt::Write;
 use std::mem::{align_of, size_of};
 
@@ -22,6 +25,7 @@ pub struct Config {
     pub menu_key: u32,
     pub first_person_enabled: u32,
     pub locomotion_profiles: u32,
+    pub body_alignment: BodyAlignmentOptions,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -47,6 +51,7 @@ impl Default for Config {
             menu_key: 0x41,
             first_person_enabled: 0,
             locomotion_profiles: 0,
+            body_alignment: BodyAlignmentOptions::default(),
         }
     }
 }
@@ -60,6 +65,7 @@ impl Config {
             && self.first_person_enabled <= 1
             && self.locomotion_profiles & !LOCOMOTION_MASK == 0
             && self.profiles.iter().all(|profile| profile.valid())
+            && self.body_alignment.valid()
             && keys.iter().all(|key| key_valid(*key))
             && keys
                 .iter()
@@ -110,7 +116,7 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
         if section == "general" {
             match key {
                 "format_version" => {
-                    if value != "1" && value != "2" {
+                    if value != "1" && value != "2" && value != "3" {
                         return Err("unsupported format_version".into());
                     }
                 }
@@ -130,10 +136,22 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
                 _ => return Err(format!("unknown key: {key}")),
             }
         } else if section == "first_person" {
-            if key != "enabled" {
-                return Err(format!("unknown first_person key: {key}"));
+            match key {
+                "enabled" => config.first_person_enabled = boolean(value)?,
+                "alignment_enabled" => config.body_alignment.alignment_enabled = boolean(value)?,
+                "body_backset" => {
+                    config.body_alignment.body_backset =
+                        value.parse().map_err(|_| "expected number")?
+                }
+                "body_side" => {
+                    config.body_alignment.body_side =
+                        value.parse().map_err(|_| "expected number")?
+                }
+                _ => return Err(format!("unknown first_person key: {key}")),
             }
-            config.first_person_enabled = boolean(value)?;
+            if !config.body_alignment.valid() {
+                return Err(format!("invalid value for {key}"));
+            }
         } else {
             let i = SECTIONS
                 .iter()
@@ -190,8 +208,10 @@ pub fn serialize_config(config: &Config) -> Result<String, String> {
         return Err("invalid configuration".into());
     }
     let mut text = String::with_capacity(2048);
-    writeln!(text, "[general]\nformat_version=2\nenabled={}\ntoggle_key={}\nshoulder_key={}\nreload_key={}\nmenu_key={}\n\n[first_person]\nenabled={}\n",
-        config.enabled != 0, config.keys[0], config.keys[1], config.keys[2], config.menu_key, config.first_person_enabled != 0).map_err(|_| "format failed")?;
+    writeln!(text, "[general]\nformat_version=3\nenabled={}\ntoggle_key={}\nshoulder_key={}\nreload_key={}\nmenu_key={}\n\n[first_person]\nenabled={}\nalignment_enabled={}\nbody_backset={}\nbody_side={}\n",
+        config.enabled != 0, config.keys[0], config.keys[1], config.keys[2], config.menu_key,
+        config.first_person_enabled != 0, config.body_alignment.alignment_enabled != 0,
+        config.body_alignment.body_backset, config.body_alignment.body_side).map_err(|_| "format failed")?;
     for (i, name) in SECTIONS.iter().enumerate() {
         let p = config.profiles[i];
         writeln!(text, "[{name}]").map_err(|_| "format failed")?;

@@ -5,7 +5,28 @@ fn abi_layout_is_fixed_width_and_padding_free() {
     assert_eq!((size_of::<State>(), align_of::<State>()), (64, 4));
     assert_eq!((size_of::<Frame>(), align_of::<Frame>()), (40, 4));
     assert_eq!((size_of::<Profile>(), align_of::<Profile>()), (40, 4));
-    assert_eq!((size_of::<Config>(), align_of::<Config>()), (308, 4));
+    assert_eq!((size_of::<Config>(), align_of::<Config>()), (320, 4));
+    assert_eq!(
+        (
+            size_of::<BodyAlignmentFrame>(),
+            align_of::<BodyAlignmentFrame>()
+        ),
+        (36, 4)
+    );
+    assert_eq!(
+        (
+            size_of::<BodyAlignmentOptions>(),
+            align_of::<BodyAlignmentOptions>()
+        ),
+        (12, 4)
+    );
+    assert_eq!(
+        (
+            size_of::<BodyAlignmentResult>(),
+            align_of::<BodyAlignmentResult>()
+        ),
+        (20, 4)
+    );
     assert_eq!(size_of::<Coordinator>(), 8);
     assert_eq!(size_of::<Context>(), 24);
     assert_eq!(size_of::<Decision>(), 24);

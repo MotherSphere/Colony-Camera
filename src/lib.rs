@@ -1,8 +1,10 @@
 //! Independent deterministic camera math. Positions are world-space; rotations are w,x,y,z.
 mod config;
 mod coordinator;
+mod first_person;
 pub use config::*;
 pub use coordinator::*;
+pub use first_person::*;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

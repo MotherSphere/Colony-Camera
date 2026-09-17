@@ -50,7 +50,7 @@ def verify(exe, database):
     header = (Path(__file__).resolve().parents[1] / "plugin/runtime.h").read_text()
     entries = re.findall(r'Entry (\w+)\{"\w+", (0x[0-9A-F]+), \{([^}]+)\}', header)
     expected = {"begin", "end", "update", "collision", "matrix",
-                "firstBegin", "firstEnd", "firstUpdate", "messageBox"}
+                "firstBegin", "firstEnd", "firstUpdate", "firstTranslation", "messageBox"}
     require(len(entries) == len(expected) and {e[0] for e in entries} == expected,
             "Runtime header entry inventory differs from verifier")
     vtables = dict(re.findall(r'std::uintptr_t (\w+Vtable) = (0x[0-9A-F]+);', header))
@@ -79,7 +79,7 @@ def verify(exe, database):
         else:
             first = name.startswith("first")
             method = name[5:].lower() if first else name
-            slot = {"begin": 1, "end": 2, "update": 3}[method]
+            slot = {"begin": 1, "end": 2, "update": 3, "translation": 5}[method]
             table = int(vtables["firstVtable" if first else "thirdVtable"], 16)
             require(struct.unpack("<Q", read(table+8*slot, 8))[0] == base+rva,
                     f"{name}: vtable slot mismatch")
