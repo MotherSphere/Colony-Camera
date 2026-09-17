@@ -1,11 +1,12 @@
 use colony_camera::*;
-use std::mem::{align_of, size_of};
+use std::mem::{align_of, offset_of, size_of};
 #[test]
 fn abi_layout_is_fixed_width_and_padding_free() {
     assert_eq!((size_of::<State>(), align_of::<State>()), (64, 4));
     assert_eq!((size_of::<Frame>(), align_of::<Frame>()), (40, 4));
     assert_eq!((size_of::<Profile>(), align_of::<Profile>()), (40, 4));
-    assert_eq!((size_of::<Config>(), align_of::<Config>()), (320, 4));
+    assert_eq!((size_of::<Config>(), align_of::<Config>()), (324, 4));
+    assert_eq!(offset_of!(Config, third_person_enabled), 320);
     assert_eq!(
         (
             size_of::<BodyAlignmentFrame>(),
@@ -28,12 +29,17 @@ fn abi_layout_is_fixed_width_and_padding_free() {
         (20, 4)
     );
     assert_eq!(size_of::<Coordinator>(), 8);
-    assert_eq!(size_of::<Context>(), 24);
+    assert_eq!(size_of::<Context>(), 28);
+    assert_eq!(offset_of!(Context, third_person_enabled), 24);
     assert_eq!(size_of::<Decision>(), 24);
 }
 #[test]
 fn ffi_roundtrip_and_capacity_query_leave_partial_output_unchanged() {
-    let config = Config::default();
+    let config = Config {
+        first_person_enabled: 1,
+        third_person_enabled: 0,
+        ..Config::default()
+    };
     let mut written = 0;
     unsafe {
         assert_eq!(

@@ -60,6 +60,7 @@ int main() {
     auto c = cc_defaults();
     assert(c.enabled == 1 && c.keys[0] == 0x42);
     assert(c.first_person_enabled == 0 && c.body_alignment.alignment_enabled == 1);
+    assert(c.third_person_enabled == 1);
     assert(c.body_alignment.body_backset == 12 && c.body_alignment.body_side == 0);
     BodyAlignmentFrame body{{0,0,130},{0,0,125},{0,2},1,{0,0,0},0};
     auto alignment = cc_align_body(body, c.body_alignment);
@@ -88,9 +89,10 @@ int main() {
     f.reset = 0; f.world_fov = 55;
     s = cc_step(s, f, adjusted);
     assert(s.fov == 67 && s.fov_delta == 12);
-    const char* good = "[combat]\nx=42\n";
+    const char* good = "[combat]\nx=42\n[third_person]\nenabled=false\n[first_person]\nenabled=true\n";
     assert(cc_parse_config(reinterpret_cast<const unsigned char*>(good), std::strlen(good), &c) == 0);
     assert(c.profiles[1].offset[0] == 42);
+    assert(c.third_person_enabled == 0 && c.first_person_enabled == 1);
     auto previous = c;
     const char* bad = "[combat]\nx=NaN";
     assert(cc_parse_config(reinterpret_cast<const unsigned char*>(bad), std::strlen(bad), &c) != 0);
@@ -113,7 +115,7 @@ int main() {
     assert(cc_serialize_config(&c, reinterpret_cast<unsigned char*>(&c), sizeof(c), &required) == 1);
 
     CameraContext context{CC_THIRD_PERSON, CC_AVAILABLE | CC_CONTROLS | CC_WEAPON_DRAWN,
-        1, 0, 0, 0};
+        1, 0, 0, 0, 1};
     auto decision = cc_coordinate({}, context);
     assert(decision.owner == CC_THIRD_PERSON && decision.profile == CC_COMBAT && decision.reset == 1);
     context.flags |= CC_AIMING;
@@ -122,7 +124,17 @@ int main() {
     context.flags |= CC_DEAD;
     decision = cc_coordinate(decision.next, context);
     assert(decision.owner == CC_NATIVE && decision.reason == CC_DEATH && decision.reset == 1);
-    context = {CC_FIRST_PERSON, CC_AVAILABLE | CC_CONTROLS, 1, 1, 0, 0};
+    context = {CC_FIRST_PERSON, CC_AVAILABLE | CC_CONTROLS, 1, 1, 0, 0, 0};
     decision = cc_coordinate(decision.next, context);
     assert(decision.owner == CC_NATIVE && decision.reason == CC_FIRST_PERSON_UNAVAILABLE);
+    context.first_person_ready = 1;
+    context.flags |= CC_AIMING | CC_WEAPON_DRAWN;
+    decision = cc_coordinate(decision.next, context);
+    assert(decision.owner == CC_FIRST_PERSON && decision.profile == CC_EXPLORATION);
+    context.camera_mode = CC_THIRD_PERSON;
+    decision = cc_coordinate(decision.next, context);
+    assert(decision.owner == CC_NATIVE && decision.reason == CC_THIRD_PERSON_DISABLED);
+    context.third_person_enabled = 1;
+    decision = cc_coordinate(decision.next, context);
+    assert(decision.owner == CC_THIRD_PERSON && decision.profile == CC_AIM);
 }

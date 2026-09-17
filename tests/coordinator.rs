@@ -3,6 +3,7 @@ fn context(flags: u32) -> Context {
     Context {
         camera_mode: THIRD_PERSON,
         enabled: 1,
+        third_person_enabled: 1,
         flags: AVAILABLE | CONTROLS | flags,
         ..Context::default()
     }
@@ -106,6 +107,62 @@ fn action_priority_is_aim_swim_sneak_sprint_airborne_combat_exploration() {
     let c = context(SNEAKING | SWIMMING | WEAPON_DRAWN);
     assert_eq!(coordinate(Coordinator::default(), c).profile, COMBAT);
 }
+
+#[test]
+fn third_person_toggle_releases_only_third_person_and_master_still_disables_both() {
+    let mut c = context(0);
+    let active = coordinate(Coordinator::default(), c);
+    c.third_person_enabled = 0;
+    let disabled = coordinate(active.next, c);
+    assert_eq!(disabled.owner, NATIVE);
+    assert_eq!(disabled.reason, THIRD_PERSON_DISABLED);
+    assert_eq!(disabled.reset, 1);
+    assert_eq!(coordinate(disabled.next, c).reset, 0);
+    c.third_person_enabled = 1;
+    let restored = coordinate(disabled.next, c);
+    assert_eq!(restored.owner, THIRD_PERSON);
+    assert_eq!(restored.reset, 1);
+
+    c.camera_mode = FIRST_PERSON;
+    c.first_person_enabled = 1;
+    c.first_person_ready = 1;
+    let first_person = coordinate(restored.next, c);
+    assert_eq!(first_person.owner, FIRST_PERSON);
+    c.third_person_enabled = 0;
+    let unchanged = coordinate(first_person.next, c);
+    assert_eq!(unchanged.owner, FIRST_PERSON);
+    assert_eq!(unchanged.reason, ACTIVE);
+    assert_eq!(unchanged.reset, 0);
+    for mode in [FIRST_PERSON, THIRD_PERSON] {
+        c.camera_mode = mode;
+        c.enabled = 0;
+        let decision = coordinate(unchanged.next, c);
+        assert_eq!(decision.owner, NATIVE);
+        assert_eq!(decision.reason, DISABLED);
+    }
+}
+
+#[test]
+fn first_person_ignores_third_person_action_profiles_and_toggle() {
+    let flags = AIMING | WEAPON_DRAWN | SWIMMING | SPRINTING | SNEAKING | IN_AIR;
+    for third_person_enabled in [0, 1] {
+        for locomotion_profiles in [0, LOCOMOTION_MASK] {
+            let mut c = Context {
+                camera_mode: FIRST_PERSON,
+                first_person_enabled: 1,
+                first_person_ready: 1,
+                third_person_enabled,
+                locomotion_profiles,
+                ..context(flags)
+            };
+            let decision = coordinate(Coordinator::default(), c);
+            assert_eq!(decision.owner, FIRST_PERSON);
+            assert_eq!(decision.profile, EXPLORATION);
+            c.first_person_enabled = 0;
+            assert_eq!(coordinate(decision.next, c).reason, FIRST_PERSON_DISABLED);
+        }
+    }
+}
 #[test]
 fn unknown_enum_values_and_flag_bits_fail_closed() {
     for c in [
@@ -119,6 +176,10 @@ fn unknown_enum_values_and_flag_bits_fail_closed() {
         },
         Context {
             first_person_ready: 2,
+            ..context(0)
+        },
+        Context {
+            third_person_enabled: 2,
             ..context(0)
         },
         Context {

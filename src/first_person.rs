@@ -6,7 +6,7 @@
 pub struct BodyAlignmentFrame {
     pub camera: [f32; 3],
     pub head: [f32; 3],
-    /// Horizontal body-forward XY. Normalized here; no camera pitch is used.
+    /// Horizontal published-view forward XY. Normalized here, with no pitch tilt.
     pub heading: [f32; 2],
     /// Unsuppressed cumulative skeleton world scale, not a local bone scale.
     pub scale: f32,
@@ -22,7 +22,7 @@ pub struct BodyAlignmentOptions {
     pub alignment_enabled: u32,
     /// Positive moves the body behind the eye, in skeleton units at scale one.
     pub body_backset: f32,
-    /// Positive moves the body to its right, in skeleton units at scale one.
+    /// Positive moves the body to view-right, in skeleton units at scale one.
     pub body_side: f32,
 }
 impl Default for BodyAlignmentOptions {

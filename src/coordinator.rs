@@ -40,6 +40,7 @@ pub const NATIVE_STATE: u32 = 9;
 pub const FIRST_PERSON_DISABLED: u32 = 10;
 pub const FIRST_PERSON_UNAVAILABLE: u32 = 11;
 pub const INVALID_CONTEXT: u32 = 12;
+pub const THIRD_PERSON_DISABLED: u32 = 13;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -56,6 +57,7 @@ pub struct Context {
     pub first_person_enabled: u32,
     pub first_person_ready: u32,
     pub locomotion_profiles: u32,
+    pub third_person_enabled: u32,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +77,7 @@ pub fn coordinate(previous: Coordinator, context: Context) -> Decision {
             context.enabled,
             context.first_person_enabled,
             context.first_person_ready,
+            context.third_person_enabled,
         ]
         .iter()
         .any(|v| *v > 1)
@@ -99,6 +102,8 @@ pub fn coordinate(previous: Coordinator, context: Context) -> Decision {
         SPECIAL_STATE
     } else if context.camera_mode == NATIVE {
         NATIVE_STATE
+    } else if context.camera_mode == THIRD_PERSON && context.third_person_enabled == 0 {
+        THIRD_PERSON_DISABLED
     } else if context.camera_mode == FIRST_PERSON && context.first_person_enabled == 0 {
         FIRST_PERSON_DISABLED
     } else if context.camera_mode == FIRST_PERSON && context.first_person_ready == 0 {
@@ -122,7 +127,10 @@ pub fn coordinate(previous: Coordinator, context: Context) -> Decision {
     .into_iter()
     .find(|(flag, profile)| f & flag != 0 && context.locomotion_profiles & (1 << profile) != 0)
     .map(|(_, profile)| profile);
-    let profile = if f & AIMING != 0 {
+    let profile = if owner != THIRD_PERSON {
+        // First-person rendering never consumes third-person motion profiles.
+        EXPLORATION
+    } else if f & AIMING != 0 {
         AIM
     } else if let Some(profile) = locomotion {
         profile

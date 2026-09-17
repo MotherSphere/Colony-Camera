@@ -12,6 +12,27 @@ struct Node { Node* parent = nullptr; };
 }
 
 int main() {
+    // Published view heading must remain stable through yaw and look-up/down,
+    // including a vertical view where projected forward has no usable length.
+    std::array<float, 2> heading{};
+    RE::NiMatrix3 viewRotation;
+    for (float yaw : {0.0f, 0.7f, 1.57079633f, 3.14159265f, -1.2f}) {
+        for (float pitch : {0.0f, 0.8f, -1.1f, 1.57079633f, -1.57079633f}) {
+            const float s = std::sin(yaw), c = std::cos(yaw);
+            const float p = std::sin(pitch), q = std::cos(pitch);
+            viewRotation.entry[0][0] = s*q; viewRotation.entry[0][1] = -s*p; viewRotation.entry[0][2] = c;
+            viewRotation.entry[1][0] = c*q; viewRotation.entry[1][1] = -c*p; viewRotation.entry[1][2] = -s;
+            viewRotation.entry[2][0] = p; viewRotation.entry[2][1] = q; viewRotation.entry[2][2] = 0;
+            assert(body_position::ViewHeading(viewRotation, heading));
+            assert(std::abs(heading[0]-s) < 0.0001f && std::abs(heading[1]-c) < 0.0001f);
+        }
+    }
+    const auto previousHeading = heading;
+    viewRotation.entry[2][2] = std::numeric_limits<float>::quiet_NaN();
+    assert(!body_position::ViewHeading(viewRotation, heading) && heading == previousHeading);
+    for (auto& row : viewRotation.entry) for (auto& value : row) value = 0;
+    assert(!body_position::ViewHeading(viewRotation, heading) && heading == previousHeading);
+
     // Sheathed idle preserves full body arms; fists/weapons readied and an
     // equipped torch need the native equipment rig without duplicate body arms.
     const auto idle = body_position::SelectArms(false, false);

@@ -26,6 +26,7 @@ pub struct Config {
     pub first_person_enabled: u32,
     pub locomotion_profiles: u32,
     pub body_alignment: BodyAlignmentOptions,
+    pub third_person_enabled: u32,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -52,6 +53,7 @@ impl Default for Config {
             first_person_enabled: 0,
             locomotion_profiles: 0,
             body_alignment: BodyAlignmentOptions::default(),
+            third_person_enabled: 1,
         }
     }
 }
@@ -63,6 +65,7 @@ impl Config {
         let keys = [self.keys[0], self.keys[1], self.keys[2], self.menu_key];
         self.enabled <= 1
             && self.first_person_enabled <= 1
+            && self.third_person_enabled <= 1
             && self.locomotion_profiles & !LOCOMOTION_MASK == 0
             && self.profiles.iter().all(|profile| profile.valid())
             && self.body_alignment.valid()
@@ -95,7 +98,11 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
             continue;
         }
         if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            if name != "general" && name != "first_person" && !SECTIONS.contains(&name) {
+            if name != "general"
+                && name != "first_person"
+                && name != "third_person"
+                && !SECTIONS.contains(&name)
+            {
                 return Err(format!("line {}: unknown section", index + 1));
             }
             section = name;
@@ -116,7 +123,7 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
         if section == "general" {
             match key {
                 "format_version" => {
-                    if value != "1" && value != "2" && value != "3" {
+                    if value != "1" && value != "2" && value != "3" && value != "4" {
                         return Err("unsupported format_version".into());
                     }
                 }
@@ -134,6 +141,11 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
                     }
                 }
                 _ => return Err(format!("unknown key: {key}")),
+            }
+        } else if section == "third_person" {
+            match key {
+                "enabled" => config.third_person_enabled = boolean(value)?,
+                _ => return Err(format!("unknown third_person key: {key}")),
             }
         } else if section == "first_person" {
             match key {
@@ -208,8 +220,9 @@ pub fn serialize_config(config: &Config) -> Result<String, String> {
         return Err("invalid configuration".into());
     }
     let mut text = String::with_capacity(2048);
-    writeln!(text, "[general]\nformat_version=3\nenabled={}\ntoggle_key={}\nshoulder_key={}\nreload_key={}\nmenu_key={}\n\n[first_person]\nenabled={}\nalignment_enabled={}\nbody_backset={}\nbody_side={}\n",
+    writeln!(text, "[general]\nformat_version=4\nenabled={}\ntoggle_key={}\nshoulder_key={}\nreload_key={}\nmenu_key={}\n\n[third_person]\nenabled={}\n\n[first_person]\nenabled={}\nalignment_enabled={}\nbody_backset={}\nbody_side={}\n",
         config.enabled != 0, config.keys[0], config.keys[1], config.keys[2], config.menu_key,
+        config.third_person_enabled != 0,
         config.first_person_enabled != 0, config.body_alignment.alignment_enabled != 0,
         config.body_alignment.body_backset, config.body_alignment.body_side).map_err(|_| "format failed")?;
     for (i, name) in SECTIONS.iter().enumerate() {

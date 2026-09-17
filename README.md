@@ -1,10 +1,11 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.2 is a development candidate** with configurable
+CommonLibSSE-NG bridge. **0.2.3 is a development candidate** with configurable
 third-person transitions, native settings menus and an opt-in first-person body
-experiment. It corrects the model update phase and transform propagation used by
-first-person body alignment. It is not a complete SmoothCam or Improved Camera replacement.
+experiment. It aligns the first-person body to the final rendered view during
+movement and provides independent perspective switches. It is not a complete
+SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
@@ -34,14 +35,20 @@ use native first-person arms. Head/third-person arm masking and equipment visibi
 are temporary, with restoration when the plugin still owns the changed values.
 Missing or replaced skeleton nodes cause a native fallback.
 
-User testing of 0.2.0 and 0.2.1 confirmed body visibility but rejected the framing.
-0.2.2 publishes the body after the native first-person model update, using a full
-transform pass with animation-controller advancement disabled. It aligns the
-body's eye landmark to the native eye when available, with a head fallback and
-adjustable backset/lateral offset. It checks the resulting world transforms and
-returns local bone scales to their native values immediately after publication.
-It does not rescale the body, shift it vertically or alter the native camera/FOV.
-**0.2.2 framing is not yet visually validated.**
+User testing of 0.2.2 reports good stationary framing but body/view drift during
+looking and strafing. Its raw model eye was sampled before native camera spring
+and collision corrections. 0.2.3 instead uses the displayed NiCamera position
+and heading after both model and camera updates. Each pass restores prior owned
+output before resampling; new first-person transitions wait for a native view
+update. Inactive state-update callbacks cannot restore the other perspective's
+outputs. No third-person interpolation runs in first person.
+
+Alignment prefers the body's eye landmark with a head fallback and adjustable
+backset/lateral offset. A full transform pass with controller advancement disabled
+checks resulting world transforms, then returns temporary local values to native
+values. Body scale and height and native camera/FOV remain unchanged.
+**0.2.3 motion correction is not yet visually validated.** The animated torso can
+still move relative to its eye landmark; height/projection/mesh clipping is separate.
 
 Improved Camera's default profile is the functional target, including its default
 absence of head bob. This candidate does not yet match its head visibility,
@@ -105,8 +112,11 @@ temporary file, then replacing the INI while keeping its previous version as
 in the backup. Reload rejects malformed files and retains active settings.
 Closing the menu alone does not save changes. Shoulder choice is session-only.
 
-INI format 3 accepts formats 1 and 2, preserving bindings and the existing
-first-person enabled state. Missing alignment fields use the new defaults;
+INI format 4 accepts formats 1, 2 and 3, preserving bindings and the existing
+first-person enabled state. Missing `[third_person] enabled` defaults to true.
+The third-person switch affects only that perspective; first person retains its
+own switch. Ctrl+F8 / General > Toggle effect remains the master switch for both.
+Missing alignment fields use the new defaults;
 the body experiment remains off in a fresh configuration. Missing locomotion
 sections remain inactive. Missing `offset_half_life` inherits an explicitly supplied
 legacy `half_life`. Existing key remaps are retained; if an older binding already
@@ -116,7 +126,7 @@ non-finite numbers and out-of-range values reject the entire file.
 First Person provides the body toggle, an alignment toggle and numeric backset/
 lateral controls. In `[first_person]`, `alignment_enabled=true` requests horizontal
 alignment, `body_backset=12` moves the body backward (0-40), and `body_side=0`
-moves it laterally (-20 to 20; positive is the player's right). Units are relative
+moves it laterally (-20 to 20; positive is the view's horizontal right). Units are relative
 to skeleton scale 1. Unsafe positions or excessive translations retain native
 placement. Disable alignment to compare the previous framing while keeping the
 body experiment enabled. Save persists these settings; the native camera and
@@ -187,7 +197,7 @@ cmake --build build-cross --parallel 2
 
 That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
 Its Windows test executables require Windows or a separate Wine test prefix.
-The 0.2.2 cross-build is not yet verified.
+The 0.2.3 cross-build is not yet verified.
 
 Validate entry bytes, Address Library mappings and camera RTTI against a
 legitimate local game installation:
@@ -196,19 +206,20 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
-The 0.2.2 Windows x64 DLL compiled. All 41 Rust tests, formatting and Clippy passed.
-Native ABI, configuration persistence and body-position/publication/arm-policy
-tests passed. Runtime verification passed 12 entry checks, two camera RTTI checks,
-one context-checked model call and seven negative cases.
+The 0.2.3 Windows x64 DLL and test targets compiled. Rust formatting and Clippy
+passed. Native ownership and timing tests passed. New regressions cover independent
+perspective switches, configuration migration, final-view versus raw-eye motion,
+and camera heading through yaw and vertical pitch. Their execution was blocked
+by Windows Application Control, as were the native ABI, persistence, hook and
+body-position targets. The full Rust run stopped before executing tests (4551).
 
-The full suite is **not green**: Windows blocked the hook-validation and timing
-test executables. It also blocked loading the new DLL; Code Integrity events
-3033/3077 identify its signing-policy rejection. Thus DLL loading and null-SKSE
-rejection are not validated for 0.2.2. The unchanged ownership executable remains
-previously blocked and was not retried. No security setting was changed.
-**0.2.2 visual alignment validation remains pending.** Earlier user tests confirm
-body visibility and poor framing, not aiming, collision or compatibility
-correctness. Compilation and static export checks cannot verify rendering.
+The full suite is **not green**. Windows also blocked loading the new DLL; fresh
+Code Integrity event 3077 identifies its signing-policy rejection. DLL loading,
+null-SKSE rejection and the new regressions remain unvalidated for 0.2.3. No
+security setting was changed or alternate executable used. Runtime verification
+passed 14 entry checks, two camera RTTI checks, both context-checked model/camera
+calls and 15 negative cases. **Visual motion validation remains pending.**
+Compilation and static export checks cannot verify rendering or compatibility.
 
 Before using a candidate broadly, check new/load game, repeated POV switching,
 walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transitions,
@@ -248,8 +259,9 @@ and intact notices. A local commit link is unavailable publicly until pushed.
 Sampled `PERF` logs separate first/third-person and enabled/disabled callback CPU
 work from the preceding hook chain, with collision, Rust and scene stages. Every
 sixteenth callback is sampled; reports include p50/p95/p99 of up to 64 sampled
-own-time values. First-person samples cover the model callback and its preceding
-model-update chain; third-person samples cover the camera-state callback. These
+own-time values. First-person model and final-view callbacks are reported in
+separate stages with their preceding chains; third-person samples cover the
+camera-state callback. These
 are callback samples, not complete-frame percentiles or comparable stage costs.
 The logs do not measure complete frame time, GPU body-render cost or unsampled
 worst-case spikes. Instrumentation overhead has not been calibrated.

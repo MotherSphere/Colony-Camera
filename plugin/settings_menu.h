@@ -45,7 +45,7 @@ class Menu {
         if (!cc_validate_config(&draft)) apply(draft);
     }
     void General() {
-        Page(std::format("General\nEffect: {}\nChanges apply immediately. Save writes the INI with a .bak backup.", draft.enabled ? "On" : "Off"),
+        Page(std::format("General\nMaster effect: {}\nThis switch controls both perspectives. Each perspective also has its own switch. Save writes the INI with a .bak backup.", draft.enabled ? "On" : "Off"),
             {"Toggle effect", "Controls", "Save settings", "Reload saved settings", "Restore defaults", "Back"}, [this](auto b) {
             switch (b) {
             case 0: draft.enabled ^= 1; CommitDraft(); General(); break;
@@ -82,15 +82,16 @@ class Menu {
         });
     }
     void Profiles() {
-        Page("Third Person\nAiming takes precedence over locomotion. Locomotion overrides are optional; ordinary combat and exploration remain available.",
-            {names[0], names[1], names[3], names[4], names[5], names[6], "Back"}, [this](auto b) {
+        Page(std::format("Third Person\nCamera effect: {}\nTurning this off leaves first person enabled independently. Aiming takes precedence over optional locomotion profiles.", draft.third_person_enabled ? "On" : "Off"),
+            {"Toggle third person", names[0], names[1], names[3], names[4], names[5], names[6], "Back"}, [this](auto b) {
             const unsigned indices[] = {0, 1, 3, 4, 5, 6};
-            if (b < 6) Profile(indices[b]); else Root();
+            if (b == 0) { draft.third_person_enabled ^= 1; CommitDraft(); Profiles(); }
+            else if (b < 7) Profile(indices[b - 1]); else Root();
         });
     }
     void Profile(unsigned index) {
         const auto& p = draft.profiles[index];
-        Page(std::format("{}\nOffset ({:.1f}, {:.1f}, {:.1f}), added depth {:.1f}, FOV delta {:.1f}\nPosition half-life {:.2f}s, maximum lag {:.1f}.",
+        Page(std::format("Third Person / {}\nOffset ({:.1f}, {:.1f}, {:.1f}), added depth {:.1f}, FOV delta {:.1f}\nPosition half-life {:.2f}s, maximum lag {:.1f}.",
             names[index], p.offset[0], p.offset[1], p.offset[2], p.zoom, p.fov_offset, p.half_life, p.max_lag),
             {"Offsets", "Motion", "Depth / FOV", "Toggle locomotion override", "Reset profile", "Back"}, [this, index](auto b) {
             if (b < 3) Fields(index, b);

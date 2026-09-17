@@ -61,6 +61,7 @@ struct CameraConfig {
     std::uint32_t first_person_enabled; // request only: renderer readiness is separate
     std::uint32_t locomotion_profiles; // bit (1 << CameraProfileIndex), opt-in sections
     BodyAlignmentOptions body_alignment;
+    std::uint32_t third_person_enabled; // independent gate; enabled remains the master
 };
 enum CameraOwner : std::uint32_t { CC_NATIVE, CC_THIRD_PERSON, CC_FIRST_PERSON };
 enum CameraFlags : std::uint32_t {
@@ -75,7 +76,7 @@ enum CameraFallback : std::uint32_t {
     CC_ACTIVE, CC_DISABLED, CC_UNAVAILABLE, CC_MENU_OPEN, CC_CONTROLS_UNAVAILABLE,
     CC_DEATH, CC_RAGDOLL_STATE, CC_KILLMOVE_STATE, CC_SPECIAL_STATE,
     CC_NATIVE_STATE, CC_FIRST_PERSON_DISABLED, CC_FIRST_PERSON_UNAVAILABLE,
-    CC_INVALID_CONTEXT
+    CC_INVALID_CONTEXT, CC_THIRD_PERSON_DISABLED
 };
 struct CameraCoordinator { std::uint32_t owner; std::uint32_t initialized; };
 struct CameraContext {
@@ -85,6 +86,7 @@ struct CameraContext {
     std::uint32_t first_person_enabled;
     std::uint32_t first_person_ready;
     std::uint32_t locomotion_profiles;
+    std::uint32_t third_person_enabled;
 };
 struct CameraDecision {
     CameraCoordinator next;
@@ -95,14 +97,15 @@ struct CameraDecision {
 };
 static_assert(std::is_standard_layout_v<CameraState> && std::is_trivially_copyable_v<CameraConfig>);
 static_assert(sizeof(CameraState) == 64 && sizeof(CameraFrame) == 40);
-static_assert(sizeof(CameraProfile) == 40 && sizeof(CameraConfig) == 320);
+static_assert(sizeof(CameraProfile) == 40 && sizeof(CameraConfig) == 324);
 static_assert(sizeof(BodyAlignmentFrame) == 52 && sizeof(BodyAlignmentOptions) == 12 && sizeof(BodyAlignmentResult) == 20);
 static_assert(offsetof(BodyAlignmentFrame, eye) == 36 && offsetof(BodyAlignmentFrame, eye_available) == 48);
-static_assert(sizeof(CameraCoordinator) == 8 && sizeof(CameraContext) == 24 && sizeof(CameraDecision) == 24);
+static_assert(sizeof(CameraCoordinator) == 8 && sizeof(CameraContext) == 28 && sizeof(CameraDecision) == 24);
 static_assert(alignof(CameraState) == 4 && alignof(CameraConfig) == 4);
 static_assert(offsetof(CameraState, base) == 28 && offsetof(CameraProfile, offset_half_life) == 20);
 static_assert(offsetof(CameraConfig, keys) == 280 && offsetof(CameraConfig, menu_key) == 296);
 static_assert(offsetof(CameraConfig, body_alignment) == 308 && alignof(BodyAlignmentFrame) == 4);
+static_assert(offsetof(CameraConfig, third_person_enabled) == 320 && offsetof(CameraContext, third_person_enabled) == 24);
 
 extern "C" CameraState cc_step(CameraState, CameraFrame, CameraProfile);
 extern "C" CameraDecision cc_coordinate(CameraCoordinator, CameraContext);

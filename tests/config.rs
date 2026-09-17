@@ -49,14 +49,14 @@ fn canonical_settings_roundtrip_every_profile_and_opt_in_field() {
     assert_eq!(c.profiles[SPRINT as usize].offset_half_life, 0.1);
     assert_eq!(c.first_person_enabled, 1);
     let text = serialize_config(&c).unwrap();
-    assert!(text.contains("format_version=3"));
+    assert!(text.contains("format_version=4"));
     assert_eq!(parse_config(&text).unwrap(), c);
 }
 
 #[test]
 fn rejects_new_invalid_values_without_silently_accepting_typos() {
     for text in [
-        "[general]\nformat_version=4",
+        "[general]\nformat_version=5",
         "[general]\nmenu_key=66",
         "[sprint]\nactive=1",
         "[first_person]\nenabled=1",
@@ -75,6 +75,7 @@ fn legacy_body_experiment_gets_alignment_without_changing_enablement_or_bindings
         let text = format!("[general]\nformat_version={version}\ntoggle_key=80\nshoulder_key=81\nreload_key=82\nmenu_key=83\n[first_person]\nenabled=true");
         let config = parse_config(&text).unwrap();
         assert_eq!(config.first_person_enabled, 1);
+        assert_eq!(config.third_person_enabled, 1);
         assert_eq!(config.keys, [80, 81, 82]);
         assert_eq!(config.menu_key, 83);
         assert_eq!(
@@ -95,7 +96,7 @@ fn body_alignment_options_roundtrip_and_reject_invalid_values() {
     assert_eq!(config.body_alignment.body_backset, 27.125);
     assert_eq!(config.body_alignment.body_side, -9.5);
     let text = colony_camera::serialize_config(&config).unwrap();
-    assert!(text.contains("format_version=3"));
+    assert!(text.contains("format_version=4"));
     assert_eq!(parse_config(&text).unwrap(), config);
     for value in [
         "alignment_enabled=1",
@@ -116,4 +117,40 @@ fn body_alignment_options_roundtrip_and_reject_invalid_values() {
     invalid.body_alignment.body_backset = f32::NAN;
     assert!(!invalid.valid());
     assert!(colony_camera::serialize_config(&invalid).is_err());
+}
+
+#[test]
+fn third_person_switch_roundtrips_independently_of_first_person_and_master() {
+    use colony_camera::{serialize_config, Config};
+    assert_eq!(Config::default().third_person_enabled, 1);
+    assert_eq!(parse_config("").unwrap().third_person_enabled, 1);
+    for master in [0, 1] {
+        for first_person in [0, 1] {
+            for third_person in [0, 1] {
+                let config = Config {
+                    enabled: master,
+                    first_person_enabled: first_person,
+                    third_person_enabled: third_person,
+                    ..Config::default()
+                };
+                let text = serialize_config(&config).unwrap();
+                assert!(text.contains("format_version=4"));
+                assert!(text.contains(&format!("[third_person]\nenabled={}", third_person != 0)));
+                assert_eq!(parse_config(&text).unwrap(), config);
+            }
+        }
+    }
+    for text in [
+        "[third_person]\nenabled=1",
+        "[third_person]\nsmoothing_enabled=false",
+        "[third_person]\nenabled=true\nenabled=false",
+    ] {
+        assert!(parse_config(text).is_err(), "{text}");
+    }
+    let invalid = Config {
+        third_person_enabled: 2,
+        ..Config::default()
+    };
+    assert!(!invalid.valid());
+    assert!(serialize_config(&invalid).is_err());
 }

@@ -26,6 +26,8 @@ bool hooksInstalled = false;
 bool reportedFrame = false;
 bool reportedMovement = false;
 bool reportedBodyAlignment = false;
+bool reportedViewMotion = false;
+RE::NiPoint3 lastViewCorrection{};
 RE::BSTSmartPointer<RE::ThirdPersonState> appliedTo;
 RE::TESObjectCELL* lastCell = nullptr;
 Clock::time_point lastTick{};
@@ -41,6 +43,11 @@ REL::Relocation<FirstUpdateFn> originalFirstUpdate;
 REL::Relocation<FirstBeginFn> originalFirstBegin, originalFirstEnd;
 using BodySceneUpdateFn = void (*)(RE::NiAVObject*, RE::NiUpdateData*);
 REL::Relocation<BodySceneUpdateFn> originalBodySceneUpdate;
+using CameraViewUpdateFn = void (*)(RE::TESCamera*);
+REL::Relocation<CameraViewUpdateFn> originalCameraViewUpdate;
+RE::BSTSmartPointer<RE::TESCameraState> firstPublishedState;
+RE::NiPointer<RE::NiCamera> firstPublishedCamera;
+RE::TESCameraState* firstUpdatedInView = nullptr;
 bool firstHooksInstalled = false;
 bool firstConflict = false;
 bool menuAvailable = false;
@@ -54,6 +61,17 @@ std::array<camera::OwnedValue<float>, 4> ownedFrustum;
 RE::NiPointer<RE::NiNode> positionRoot;
 RE::NiPointer<RE::NiCamera> positionCamera;
 camera::OwnedValue<RE::NiPoint3> ownedLocal, ownedWorld, ownedRendered;
+
+void ResetFirstView() {
+    firstPublishedState.reset(); firstPublishedCamera.reset(); firstUpdatedInView = nullptr;
+}
+
+RE::NiCamera* RenderedCamera(RE::PlayerCamera* camera) {
+    auto* root = camera ? camera->cameraRoot.get() : nullptr;
+    if (root) for (const auto& child : root->GetChildren())
+        if (child) if (auto* rendered = netimmerse_cast<RE::NiCamera*>(child.get())) return rendered;
+    return nullptr;
+}
 
 void RestorePosition() {
     if (positionRoot) { ownedLocal.Restore(positionRoot->local.translate); ownedWorld.Restore(positionRoot->world.translate); }
@@ -93,7 +111,9 @@ void ApplyFov(RE::PlayerCamera* camera, RE::NiCamera* rendered, float native, fl
 void ApplyConfig(const CameraConfig& replacement) {
     if (cc_validate_config(&replacement)) return;
     bodyRenderer.Reset();
+    ResetFirstView();
     reportedBodyAlignment = false;
+    reportedViewMotion = false;
     if (appliedTo) RestoreNative(appliedTo.get());
     RestoreCamera(true);
     config = replacement;
@@ -102,12 +122,13 @@ void ApplyConfig(const CameraConfig& replacement) {
     resetRequested = true;
 }
 
-timing::Totals timings[4];
+timing::Totals timings[6];
 void ReportTiming(unsigned mode) {
     auto& t = timings[mode];
     if (!t.samples) return;
-    spdlog::info("PERF perspective={} enabled={} samples={} applied={} mean_us: own={:.2f} previous_chain={:.2f} collision={:.2f} rust={:.2f} scene={:.2f} peak_own_us={:.2f} sampled_window={} sampled_own_p50_us={:.2f} p95_us={:.2f} p99_us={:.2f}",
-        mode >= 2 ? "first" : "third", mode % 2, t.samples, t.applied, t.own/t.samples, t.native/t.samples,
+    constexpr const char* stages[] = {"camera-state", "model", "camera-view"};
+    spdlog::info("PERF perspective={} stage={} enabled={} samples={} applied={} mean_us: own={:.2f} previous_chain={:.2f} collision={:.2f} rust={:.2f} scene={:.2f} peak_own_us={:.2f} sampled_window={} sampled_own_p50_us={:.2f} p95_us={:.2f} p99_us={:.2f}",
+        mode >= 2 ? "first" : "third", stages[mode / 2], mode % 2, t.samples, t.applied, t.own/t.samples, t.native/t.samples,
         t.collision/t.samples, t.math/t.samples, t.scene/t.samples, t.peakOwn,
         t.SampledCount(), t.SampledPercentile(0.50), t.SampledPercentile(0.95), t.SampledPercentile(0.99));
     t = {};
@@ -117,9 +138,9 @@ struct Probe {
     unsigned mode;
     Clock::time_point start;
     timing::Sample result;
-    Probe(bool activeCamera, bool enabled, bool first = false) : mode(static_cast<unsigned>(enabled) + (first ? 2u : 0u)) {
-        static unsigned frame[2]{};
-        sampled = activeCamera && (++frame[first ? 1 : 0] % 16 == 0);
+    Probe(bool activeCamera, bool enabled, unsigned stage = 0) : mode(static_cast<unsigned>(enabled) + stage * 2u) {
+        static unsigned frame[3]{};
+        sampled = activeCamera && (++frame[stage] % 16 == 0);
         start = Mark();
     }
     Clock::time_point Mark() const { return sampled ? Clock::now() : Clock::time_point{}; }
@@ -165,7 +186,7 @@ CameraDecision Coordinate(RE::TESCameraState* current, bool inputEnabled) {
     auto* ui = RE::UI::GetSingleton();
     auto* controls = RE::ControlMap::GetSingleton();
     CameraContext context{CC_NATIVE, 0, config.enabled, config.first_person_enabled,
-        firstHooksInstalled && !firstConflict ? 1u : 0u, config.locomotion_profiles};
+        firstHooksInstalled && !firstConflict ? 1u : 0u, config.locomotion_profiles, config.third_person_enabled};
     if (current && current->id == RE::CameraState::kThirdPerson) context.camera_mode = CC_THIRD_PERSON;
     if (current && current->id == RE::CameraState::kFirstPerson) context.camera_mode = CC_FIRST_PERSON;
     if (current && camera && player && ui && current->camera == camera
@@ -203,16 +224,17 @@ CameraDecision Coordinate(RE::TESCameraState* current, bool inputEnabled) {
 void ProcessCommands() {
     const auto pending = commands.exchange(0);
     if (pending & 4) LoadConfig();
-    if (pending & 1) { for (unsigned mode = 0; mode < 4; ++mode) ReportTiming(mode); auto replacement = config; replacement.enabled ^= 1; ApplyConfig(replacement); spdlog::info("Enabled={}", config.enabled); }
+    if (pending & 1) { for (unsigned mode = 0; mode < std::size(timings); ++mode) ReportTiming(mode); auto replacement = config; replacement.enabled ^= 1; ApplyConfig(replacement); spdlog::info("Enabled={}", config.enabled); }
     if (pending & 2) { leftShoulder = !leftShoulder; spdlog::info("Left shoulder={}", leftShoulder); }
     if ((pending & 8) && menuAvailable) {
         bodyRenderer.Reset();
+        ResetFirstView();
         if (appliedTo) RestoreNative(appliedTo.get());
         RestoreCamera(true); resetRequested = true;
         constexpr const char* owners[] = {"Native", "Third person", "Body experiment"};
         constexpr const char* reasons[] = {"Active", "Disabled", "Camera unavailable", "Menu open", "Controls unavailable",
             "Death/bleedout", "Ragdoll", "Killmove", "Special action or unsupported race", "Native camera state",
-            "Body experiment off", "Body hooks unavailable", "Invalid camera context"};
+            "Body experiment off", "Body hooks unavailable", "Invalid camera context", "Third-person camera off"};
         const auto& alignment = bodyRenderer.GetAlignmentSample();
         const auto alignmentText = alignment.available
             ? std::format("\nLast body sample: scale {:.2f}, horizontal shift ({:.1f}, {:.1f}), eye/head height difference {:.1f}. {}",
@@ -224,9 +246,10 @@ void ProcessCommands() {
             ? std::format("\nLast scene publication: {}. Bone position error {:.3f}, scale error {:.6f}. Visual framing still needs checking.",
                 publication.matched ? "verified" : "rejected", publication.maxBonePositionError, publication.maxBoneScaleError)
             : std::string("\nNo scene publication sample yet.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.2 candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nFirst-person hooks: {}  competing provider: {}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.3 candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f}){}{}",
             decision.owner < std::size(owners) ? owners[decision.owner] : "Unknown",
-            decision.reason < std::size(reasons) ? reasons[decision.reason] : "Unknown", firstHooksInstalled, firstConflict, alignmentText, publicationText));
+            decision.reason < std::size(reasons) ? reasons[decision.reason] : "Unknown", config.third_person_enabled != 0,
+            firstHooksInstalled, firstConflict, lastViewCorrection.x, lastViewCorrection.y, lastViewCorrection.z, alignmentText, publicationText));
     }
 }
 
@@ -240,7 +263,7 @@ void RestoreNative(RE::ThirdPersonState* self) {
 void End(RE::ThirdPersonState* self) {
     RestoreNative(self);
     RestorePosition();
-    RestoreFov(); bodyRenderer.Reset(); coordinator = {};
+    RestoreFov(); coordinator = {};
     state = {};
     lastTick = {};
     originalEnd(self);
@@ -256,18 +279,24 @@ void Begin(RE::ThirdPersonState* self) {
 }
 
 void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>& next) {
+    auto* camera = RE::PlayerCamera::GetSingleton();
+    // An inactive perspective may still be visited by a chained provider. It
+    // must not restore the active body's pose or mutate the coordinator/history.
+    if (!self || !camera || camera->currentState.get() != self || self->id != RE::CameraState::kThirdPerson) {
+        originalUpdate(self, next);
+        return;
+    }
     static bool entered = false;
     if (!entered) { spdlog::info("Third-person Update callback reached"); entered = true; }
     ProcessCommands();
-    Probe probe(self->id == RE::CameraState::kThirdPerson, config.enabled != 0);
+    Probe probe(true, config.enabled && config.third_person_enabled);
     const auto restoreStamp = probe.Mark();
     // Feed the native solver its own previous result, not our filtered output.
     // Restore only an output that is still ours; never overwrite an engine/load change.
     RestoreNative(self);
-    RestorePosition(); RestoreFov(); bodyRenderer.Restore();
+    RestorePosition(); RestoreFov();
     probe.result.scene = probe.Elapsed(restoreStamp);
     if (resetRequested.load()) { state = {}; reportedFrame = false; reportedMovement = false; }
-    auto* camera = RE::PlayerCamera::GetSingleton();
     auto* player = RE::PlayerCharacter::GetSingleton();
     const auto before = Coordinate(self, self->IsInputEventHandlingEnabled());
     const bool eligible = before.owner == CC_THIRD_PERSON;
@@ -303,12 +332,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         state = {}; return;
     }
     auto* root = camera->cameraRoot.get();
-    RE::NiCamera* rendered = nullptr;
-    if (root) {
-        for (const auto& child : root->GetChildren()) {
-            if (child && (rendered = netimmerse_cast<RE::NiCamera*>(child.get()))) break;
-        }
-    }
+    auto* rendered = RenderedCamera(camera);
     if (!rendered) {
         static bool warned = false;
         if (!warned) {
@@ -391,57 +415,63 @@ void FirstBegin(RE::FirstPersonState* self) {
     RestorePosition();
     bodyRenderer.Reset(); RestoreFov(); state = {}; coordinator = {}; lastTick = {};
     reportedBodyAlignment = false;
+    reportedViewMotion = false;
+    ResetFirstView();
     originalFirstBegin(self);
 }
 void FirstEnd(RE::FirstPersonState* self) {
-    bodyRenderer.Reset(); RestoreFov(); state = {}; coordinator = {}; lastTick = {};
+    bodyRenderer.Reset(); coordinator = {};
+    ResetFirstView();
     originalFirstEnd(self);
 }
 void FirstUpdate(RE::FirstPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>& next) {
-    ProcessCommands();
-    RestoreFov();
-    originalFirstUpdate(self, next);
-    const auto current = Coordinate(self, self->IsInputEventHandlingEnabled());
-    if (current.owner != CC_FIRST_PERSON || (next && next.get() != self)) bodyRenderer.Reset();
-    // Active body publication belongs to the later model callback. Restoring it
-    // here would make the result depend on model/camera callback ordering.
-}
-
-void BodySceneUpdate(RE::NiAVObject* object, RE::NiUpdateData* update) {
-    auto* player = RE::PlayerCharacter::GetSingleton();
-    if (!player || object != player->Get3D(true)) {
-        originalBodySceneUpdate(object, update);
+    auto* camera = RE::PlayerCamera::GetSingleton();
+    if (!self || !camera || camera->currentState.get() != self || self->id != RE::CameraState::kFirstPerson) {
+        originalFirstUpdate(self, next);
         return;
     }
+    ProcessCommands();
+    originalFirstUpdate(self, next);
+    if (camera->currentState.get() == self && (!next || next.get() == self)) firstUpdatedInView = self;
+    const auto current = Coordinate(self, self->IsInputEventHandlingEnabled());
+    if (current.owner != CC_FIRST_PERSON || (next && next.get() != self)) bodyRenderer.Reset();
+    // The final view is not ready until the containing TESCamera update returns.
+    // Both view and model publication use the displayed camera as their anchor.
+}
+
+void PublishFirstPersonBody(Probe& probe, const char* phase) {
+    auto* player = RE::PlayerCharacter::GetSingleton();
     auto* camera = RE::PlayerCamera::GetSingleton();
-    const bool first = camera && camera->currentState && camera->currentState->id == RE::CameraState::kFirstPerson;
-    Probe probe(first, config.enabled != 0, true);
-    auto stamp = probe.Mark();
-    bodyRenderer.Restore();
-    probe.result.scene = probe.Elapsed(stamp);
-    stamp = probe.Mark();
-    originalBodySceneUpdate(object, update);
-    probe.result.native = probe.Elapsed(stamp);
-    // Native actor positioning and both model passes have now run. Reacquire the
-    // player/state in case an earlier provider changed POV or replaced its nodes.
-    player = RE::PlayerCharacter::GetSingleton();
-    camera = RE::PlayerCamera::GetSingleton();
-    if (!player || object != player->Get3D(true) || !camera || !camera->currentState
+    if (!player || !camera || !camera->currentState
         || camera->currentState->id != RE::CameraState::kFirstPerson) { bodyRenderer.Reset(); return; }
     const auto currentState = camera->currentState;
     auto* self = static_cast<RE::FirstPersonState*>(currentState.get());
-    stamp = probe.Mark();
+    auto stamp = probe.Mark();
     const auto current = Coordinate(self, self->IsInputEventHandlingEnabled());
     probe.result.math = probe.Elapsed(stamp);
     if (current.owner != CC_FIRST_PERSON) { bodyRenderer.Reset(); return; }
-    // GetTranslation reads the native first-person camera object's world position,
-    // freshly propagated by the model pass just chained above.
-    if (!self->firstPersonCameraObj) { bodyRenderer.Reset(); return; }
-    RE::NiPoint3 nativeEye{};
-    self->GetTranslation(nativeEye);
+    auto* rendered = RenderedCamera(camera);
+    if (!rendered || firstPublishedState.get() != self || firstPublishedCamera.get() != rendered) {
+        bodyRenderer.Reset(); return;
+    }
+    // GetTranslation is a raw model anchor. Skyrim adds dampening and collision
+    // before publishing the view. Align to what is actually displayed instead.
+    const auto viewEye = rendered->world.translate;
+    if (self->firstPersonCameraObj) {
+        RE::NiPoint3 rawEye{};
+        self->GetTranslation(rawEye);
+        lastViewCorrection = viewEye - rawEye;
+        const auto& delta = lastViewCorrection;
+        if (!reportedViewMotion && std::isfinite(delta.x) && std::isfinite(delta.y)
+            && std::isfinite(delta.z) && delta.x*delta.x + delta.y*delta.y + delta.z*delta.z > 0.25f) {
+            spdlog::info("First-person final view differs from raw model anchor: phase={} delta=({:.3f},{:.3f},{:.3f}); body follows rendered view, third-person effect={}",
+                phase, delta.x, delta.y, delta.z, config.third_person_enabled);
+            reportedViewMotion = true;
+        }
+    }
     stamp = probe.Mark();
-    const auto status = bodyRenderer.Apply(player, nativeEye,
-        config.body_alignment, self->firstPersonCameraObj, probe.sampled);
+    const auto status = bodyRenderer.Apply(player, viewEye,
+        config.body_alignment, rendered, probe.sampled);
     const double bodyMath = bodyRenderer.AlignmentMathMicroseconds();
     probe.result.math += bodyMath;
     probe.result.scene += (std::max)(0.0, probe.Elapsed(stamp) - bodyMath);
@@ -454,8 +484,8 @@ void BodySceneUpdate(RE::NiAVObject* object, RE::NiUpdateData* update) {
     }
     const auto& alignment = bodyRenderer.GetAlignmentSample();
     if ((!reportedBodyAlignment || statusChanged) && alignment.available) {
-        spdlog::info("Body alignment sample: math_valid={} enabled={} scale={:.3f} native_eye=({:.2f},{:.2f},{:.2f}) head=({:.2f},{:.2f},{:.2f}) eye_available={} body_eye=({:.2f},{:.2f},{:.2f}) shift=({:.2f},{:.2f},{:.2f}) height_difference={:.2f} backset={:.1f} sideways={:.1f} world_fov={:.1f}; framing and equipment require visual verification",
-            alignment.result.valid, config.body_alignment.alignment_enabled, alignment.frame.scale,
+        spdlog::info("Body alignment sample: phase={} math_valid={} enabled={} scale={:.3f} rendered_eye=({:.2f},{:.2f},{:.2f}) head=({:.2f},{:.2f},{:.2f}) eye_available={} body_eye=({:.2f},{:.2f},{:.2f}) shift=({:.2f},{:.2f},{:.2f}) height_difference={:.2f} backset={:.1f} sideways={:.1f} world_fov={:.1f}; framing and equipment require visual verification",
+            phase, alignment.result.valid, config.body_alignment.alignment_enabled, alignment.frame.scale,
             alignment.frame.camera[0], alignment.frame.camera[1], alignment.frame.camera[2],
             alignment.frame.head[0], alignment.frame.head[1], alignment.frame.head[2],
             alignment.frame.eye_available, alignment.frame.eye[0], alignment.frame.eye[1], alignment.frame.eye[2],
@@ -470,6 +500,49 @@ void BodySceneUpdate(RE::NiAVObject* object, RE::NiUpdateData* update) {
             publication.maxBonePositionError, publication.maxBoneScaleError);
         reportedBodyAlignment = true;
     }
+}
+
+void BodySceneUpdate(RE::NiAVObject* object, RE::NiUpdateData* update) {
+    auto* player = RE::PlayerCharacter::GetSingleton();
+    if (!player || object != player->Get3D(true)) { originalBodySceneUpdate(object, update); return; }
+    auto* camera = RE::PlayerCamera::GetSingleton();
+    const bool first = camera && camera->currentState && camera->currentState->id == RE::CameraState::kFirstPerson;
+    Probe probe(first, config.enabled && config.first_person_enabled, 1);
+    auto stamp = probe.Mark();
+    bodyRenderer.Restore();
+    probe.result.scene = probe.Elapsed(stamp);
+    stamp = probe.Mark();
+    originalBodySceneUpdate(object, update);
+    probe.result.native = probe.Elapsed(stamp);
+    player = RE::PlayerCharacter::GetSingleton();
+    if (!player || object != player->Get3D(true)) { bodyRenderer.Reset(); return; }
+    PublishFirstPersonBody(probe, "model");
+}
+
+void CameraViewUpdate(RE::TESCamera* self) {
+    auto* camera = RE::PlayerCamera::GetSingleton();
+    if (!self || !camera || self != camera) { originalCameraViewUpdate(self); return; }
+    const auto beforeState = camera->currentState;
+    const bool first = camera->currentState && camera->currentState->id == RE::CameraState::kFirstPerson;
+    Probe probe(first, config.enabled && config.first_person_enabled, 2);
+    auto stamp = probe.Mark();
+    // Never let our previous rendered body become input to the native view solver.
+    if (first) bodyRenderer.Restore();
+    ResetFirstView();
+    probe.result.scene = probe.Elapsed(stamp);
+    stamp = probe.Mark();
+    originalCameraViewUpdate(self);
+    probe.result.native = probe.Elapsed(stamp);
+    camera = RE::PlayerCamera::GetSingleton();
+    // TESCamera can Begin a new POV without updating its view until the next
+    // call. Never align a new first-person body to the previous third-person eye.
+    if (!camera || self != camera || !first || camera->currentState != beforeState
+        || firstUpdatedInView != beforeState.get()) { bodyRenderer.Reset(); return; }
+    firstPublishedState = camera->currentState;
+    firstPublishedCamera.reset(RenderedCamera(camera));
+    // Reconcile again after the final camera pass. If model/camera order changes,
+    // whichever runs last still aligns the current body to the displayed eye.
+    PublishFirstPersonBody(probe, "camera-view");
 }
 
 class Input final : public RE::BSTEventSink<RE::InputEvent*> {
@@ -536,9 +609,11 @@ void InstallHooks() {
     firstConflict = GetModuleHandleW(L"ImprovedCamera.dll") || GetModuleHandleW(L"ImprovedCameraSE.dll");
     auto* first = camera->GetRuntimeData().cameraStates[RE::CameraState::kFirstPerson].get();
     if (!firstConflict && first) {
-        std::uintptr_t sceneTarget = 0;
+        std::uintptr_t sceneTarget = 0, viewTarget = 0;
         REL::Relocation<std::uintptr_t> sceneAddress{REL::ID(70251)};
         REL::Relocation<std::uintptr_t> bodySceneAddress{REL::ID(40522)};
+        REL::Relocation<std::uintptr_t> cameraAddress{REL::ID(33025)};
+        REL::Relocation<std::uintptr_t> playerCameraAddress{REL::ID(50784)};
         REL::Relocation<std::uintptr_t> firstTable{*reinterpret_cast<std::uintptr_t*>(first)};
         const auto* entries = reinterpret_cast<const std::uintptr_t*>(firstTable.address());
         if (firstTable.address() == base + runtime::firstVtable
@@ -549,17 +624,24 @@ void InstallHooks() {
             && bodySceneAddress.address() == base + runtime::bodySceneUpdate.rva
             && hooks::Entry(runtime::sceneUpdate, base) && hooks::Entry(runtime::bodySceneUpdate, base)
             && hooks::SceneCallTarget(runtime::bodySceneCall, base, sceneTarget)
-            && SKSE::GetTrampoline().free_size() >= 14
+            && cameraAddress.address() == base + runtime::cameraUpdate.rva
+            && playerCameraAddress.address() == base + runtime::playerCameraUpdate.rva
+            && hooks::Entry(runtime::cameraUpdate, base) && hooks::Entry(runtime::playerCameraUpdate, base)
+            && hooks::SceneCallTarget(runtime::cameraUpdateCall, base, viewTarget)
+            && SKSE::GetTrampoline().free_size() >= 28
             && hooks::ModuleCode(entries[1]) && hooks::ModuleCode(entries[2]) && hooks::ModuleCode(entries[3])
             && hooks::ModuleCode(entries[5])) {
             LogEntry("Body scene", sceneTarget);
+            LogEntry("Final camera view", viewTarget);
             originalBodySceneUpdate = sceneTarget;
+            originalCameraViewUpdate = viewTarget;
             originalBodySceneUpdate = SKSE::GetTrampoline().write_call<5>(base + runtime::bodySceneCall.rva, BodySceneUpdate);
+            originalCameraViewUpdate = SKSE::GetTrampoline().write_call<5>(base + runtime::cameraUpdateCall.rva, CameraViewUpdate);
             originalFirstBegin = firstTable.write_vfunc(1, FirstBegin);
             originalFirstEnd = firstTable.write_vfunc(2, FirstEnd);
             originalFirstUpdate = firstTable.write_vfunc(3, FirstUpdate);
             firstHooksInstalled = true;
-            spdlog::info("First-person body publication installed after the native model pass");
+            spdlog::info("First-person body publication installed after native model and final camera passes");
         } else spdlog::error("First-person vtable/model call validation or trampoline capacity failed; body experiment disabled");
     }
     if (firstConflict) spdlog::warn("Improved Camera detected; Colony Camera body experiment is disabled");
@@ -581,7 +663,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
     if (message->type == SKSE::MessagingInterface::kPreLoadGame || message->type == SKSE::MessagingInterface::kPostLoadGame
         || message->type == SKSE::MessagingInterface::kNewGame) {
         if (appliedTo) RestoreNative(appliedTo.get());
-        RestorePosition(); bodyRenderer.Reset(); RestoreFov(); coordinator = {}; settingsMenu.Cancel();
+        RestorePosition(); bodyRenderer.Reset(); ResetFirstView(); RestoreFov(); coordinator = {}; settingsMenu.Cancel();
         input.Reset(); commands = 0; resetRequested = true;
     }
 }
@@ -589,7 +671,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,2,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,2,3,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -603,7 +685,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>((*directory / "ColonyCamera.log").string(), true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.2 candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.3 candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

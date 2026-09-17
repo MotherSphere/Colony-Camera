@@ -147,8 +147,8 @@ public:
         body_.reset();
     }
 
-    Status Apply(RE::PlayerCharacter* player, const RE::NiPoint3& nativeEye,
-        const BodyAlignmentOptions& options, const RE::NiAVObject* cameraObject,
+    Status Apply(RE::PlayerCharacter* player, const RE::NiPoint3& viewEye,
+        const BodyAlignmentOptions& options, const RE::NiCamera* cameraObject,
         bool measureMath = false) {
         Restore();
         alignmentSample_.available = false;
@@ -178,7 +178,7 @@ public:
         if (!body_) return status_ = Status::missing_body;
         if (!nativeArms_ || !body_position::IndependentRoots(body_.get(), nativeArms_.get()))
             return status_ = Status::missing_native_arms;
-        if (!body_position::IndependentRoots(body_.get(), cameraObject))
+        if (!body_position::IndependentRoots(body_.get(), static_cast<const RE::NiAVObject*>(cameraObject)))
             return status_ = Status::invalid_alignment;
         if (!Finite(body_->local) || !Finite(body_->world)) return status_ = Status::invalid_transform;
         // A native producer may replace just part of our previous world pose.
@@ -201,13 +201,16 @@ public:
             body_position::WorldMatchesLocal(eyeNode_->local, eyeNode_->world,
                 eyeNode_->parent ? &eyeNode_->parent->world : nullptr, body_->world.scale);
 
-        // Native eye is sampled from FirstPersonState::GetTranslation after the
-        // chained update. Capture the unmasked head before shrinking any bones.
+        // The displayed camera includes native dampening and collision. Its
+        // caller reconciles both model and final-view updates against that eye.
+        // Capture unmasked landmarks before shrinking any bones.
         const auto& head = bones_[0]->world.translate;
-        const float yaw = player->GetAngleZ();
+        std::array<float, 2> heading{};
+        if (!body_position::ViewHeading(cameraObject->world.rotate, heading))
+            return status_ = Status::invalid_alignment;
         const auto eye = eyeAvailable ? eyeNode_->world.translate : RE::NiPoint3{};
-        const BodyAlignmentFrame frame{{nativeEye.x, nativeEye.y, nativeEye.z},
-            {head.x, head.y, head.z}, {std::sin(yaw), std::cos(yaw)}, body_->world.scale,
+        const BodyAlignmentFrame frame{{viewEye.x, viewEye.y, viewEye.z},
+            {head.x, head.y, head.z}, {heading[0], heading[1]}, body_->world.scale,
             {eye.x, eye.y, eye.z}, eyeAvailable ? 1u : 0u};
         BodyAlignmentResult alignment{};
         if (measureMath) {

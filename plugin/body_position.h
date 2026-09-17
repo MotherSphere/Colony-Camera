@@ -9,6 +9,24 @@
 #include <limits>
 
 namespace body_position {
+// NiCamera's published basis uses column 0 for depth and column 2 for screen X.
+// Verified from the native world-to-camera matrix routine on the target runtime.
+// Near vertical, screen-right still determines horizontal yaw without dividing
+// by a vanishing forward projection. On failure leave the caller's output alone.
+inline bool ViewHeading(const RE::NiMatrix3& rotation, std::array<float, 2>& result) {
+    for (const auto& row : rotation.entry)
+        for (float value : row) if (!std::isfinite(value)) return false;
+    float x = rotation.entry[0][0], y = rotation.entry[1][0];
+    float length = std::hypot(x, y);
+    if (length < 0.001f) {
+        x = -rotation.entry[1][2]; y = rotation.entry[0][2];
+        length = std::hypot(x, y);
+    }
+    if (!std::isfinite(length) || length < 0.001f) return false;
+    result = {x / length, y / length};
+    return true;
+}
+
 struct ArmSelection {
     bool hideNative;
     std::array<float, 3> boneFactors; // head, left upper arm, right upper arm

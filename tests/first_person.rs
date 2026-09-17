@@ -178,6 +178,96 @@ fn world_space_anchor_correction_does_not_depend_on_parent_translation() {
 }
 
 #[test]
+fn strafing_and_rapid_turns_align_to_the_final_camera_without_filter_lag() {
+    let options = BodyAlignmentOptions {
+        body_side: 4.0,
+        ..BodyAlignmentOptions::default()
+    };
+    // Synthetic native model and final camera positions differ as they can after
+    // camera damping/collision. The bridge must pass the final camera position;
+    // this tests the math contract, not the engine callback's sampling order.
+    let sequence = [
+        (
+            [100.0, 200.0, 130.0],
+            [100.0, 200.0, 130.0],
+            [100.0, 204.0, 128.0],
+            [0.0, 1.0],
+            [4.0, -12.0],
+        ),
+        (
+            [124.0, 200.0, 132.0],
+            [108.0, 200.0, 130.0],
+            [122.0, 204.0, 130.0],
+            [0.0, 1.0],
+            [4.0, -12.0],
+        ),
+        (
+            [148.0, 210.0, 128.0],
+            [119.0, 203.0, 129.0],
+            [144.0, 214.0, 127.0],
+            [1.0, 0.0],
+            [-12.0, -4.0],
+        ),
+        (
+            [130.0, 240.0, 132.0],
+            [125.0, 213.0, 131.0],
+            [126.0, 235.0, 129.0],
+            [0.0, -1.0],
+            [-4.0, 12.0],
+        ),
+        (
+            [100.0, 248.0, 130.0],
+            [110.0, 225.0, 130.0],
+            [96.0, 242.0, 128.0],
+            [-1.0, 0.0],
+            [12.0, 4.0],
+        ),
+    ];
+    for (raw_model, published_camera, eye, heading, expected_offset) in sequence {
+        let input = BodyAlignmentFrame {
+            camera: published_camera,
+            eye,
+            eye_available: 1,
+            head: [eye[0] - 2.0, eye[1] - 3.0, eye[2] - 4.0],
+            heading,
+            ..frame()
+        };
+        let result = align_body(input, options);
+        assert_eq!(result.valid, 1);
+        close(
+            [
+                eye[0] + result.translation[0] - published_camera[0],
+                eye[1] + result.translation[1] - published_camera[1],
+                result.translation[2],
+            ],
+            [expected_offset[0], expected_offset[1], 0.0],
+        );
+        // Sampling the raw model point would leave its difference from the
+        // displayed camera visible in full; the pure helper cannot remove it.
+        let wrong_sample = align_body(
+            BodyAlignmentFrame {
+                camera: raw_model,
+                ..input
+            },
+            options,
+        );
+        assert_eq!(wrong_sample.valid, 1);
+        close(
+            [
+                wrong_sample.translation[0] - result.translation[0],
+                wrong_sample.translation[1] - result.translation[1],
+                wrong_sample.translation[2],
+            ],
+            [
+                raw_model[0] - published_camera[0],
+                raw_model[1] - published_camera[1],
+                0.0,
+            ],
+        );
+    }
+}
+
+#[test]
 fn vertical_changes_never_lift_the_feet_or_feed_a_pitch_rotation() {
     let input = frame();
     let options = BodyAlignmentOptions::default();
