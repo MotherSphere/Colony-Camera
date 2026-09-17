@@ -14,9 +14,9 @@ No SmoothCam implementation, presets, UI or assets are included.
   https://github.com/microsoft/DirectXTK ; MIT. Header types used by CommonLib.
 
 The package includes the upstream license files without replacing their credits.
-The Rust standard library is distributed under MIT OR Apache-2.0; the package
-includes its complete COPYRIGHT-library.html notice from the build toolchain. No new crates are needed by the Rust camera core.
+The Rust standard library is distributed under MIT OR Apache-2.0; the install package
+includes its complete COPYRIGHT-library.html notice, preserved inside LICENSES.txt. No new crates are needed by the Rust camera core.
 
 Dependency checkouts are fetched at the exact revisions in dependencies.json.
-The source archive contains project source, build instructions and this manifest;
+The separately downloadable source archive contains project source, build instructions and this manifest;
 the accompanying dependency archive supplies the referenced dependency sources.

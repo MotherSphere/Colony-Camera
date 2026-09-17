@@ -21,9 +21,11 @@ an implementation of its complete feature set.
 ## 0.1.2 distribution update
 
 [Download the corrected package and corresponding source](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2).
-The update retains the original DLL and INI and restores the GPL license,
-upstream notices, CommonLib exceptions and exact project/dependency source
-archives. Both source archives are also included inside the installable ZIP.
+The install ZIP retains the original DLL and INI and includes a consolidated
+`LICENSES.txt` plus a short `README.txt` linking to the exact corresponding source.
+It contains no source directories, checksum manifest or revision file.
+The full project/dependency source ZIP is a separate release asset.
+Upstream notices are also retained in `licenses/` in this repository.
 This is a packaging correction, not a camera behavior or version change.
 
 ## Features
