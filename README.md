@@ -1,5 +1,22 @@
 # Colony Camera
 
+## Public source and license
+
+Source code for **Camera Colony** on Nexus is published here under
+**GPL-3.0-or-later**; the complete license is in [LICENSE](LICENSE).
+
+- [0.1.2 alpha source](https://github.com/MotherSphere/Colony-Camera/tree/v0.1.2):
+  matches all 25 files in the source archive packaged with the 0.1.2 build.
+- The default branch contains the later **0.1.3 diagnostic** code and documentation.
+- Build instructions are below. [dependencies.json](dependencies.json) pins the
+  public source revisions of all four native dependencies; run
+  `python3 scripts/fetch-dependencies.py` to retrieve them.
+- Dependency licenses and credits remain applicable; see
+  [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+When sharing the Nexus binary, include this source link and the corresponding
+version, and retain the license and third-party notices supplied with the mod.
+
 Mod de caméra indépendant pour Skyrim, écrit en Rust avec une passerelle C++
 CommonLibSSE-NG. **Version 0.1.3 diagnostic : mesure du coût CPU après validation visuelle de 0.1.2.** Ce n'est pas une version de SmoothCam ni une copie de son code.
 
