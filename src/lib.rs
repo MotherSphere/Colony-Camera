@@ -106,7 +106,9 @@ fn interpolate(current: f32, target: f32, dt: f32, half_life: f32) -> f32 {
         return target;
     }
     let alpha = -(-std::f32::consts::LN_2 * dt / half_life).exp_m1();
-    current + (target - current) * alpha
+    // Rounding near alpha=1 can otherwise overshoot a valid endpoint and make
+    // the next frame reject its own history as out of range.
+    (current + (target - current) * alpha).clamp(current.min(target), current.max(target))
 }
 pub fn step(mut state: State, frame: Frame, profile: Profile) -> State {
     // Invalid engine input must never be published to the camera graph.
@@ -141,7 +143,10 @@ pub fn step(mut state: State, frame: Frame, profile: Profile) -> State {
     let target_fov_delta = if profile.fov_offset == 0.0 {
         0.0
     } else {
-        (frame.world_fov + profile.fov_offset).clamp(30.0, 150.0) - frame.world_fov
+        // Subtraction after clamping can round slightly outside +/-60 even
+        // though both the requested offset and target are valid.
+        ((frame.world_fov + profile.fov_offset).clamp(30.0, 150.0) - frame.world_fov)
+            .clamp(-60.0, 60.0)
     };
     if reset {
         state.base = frame.position;
