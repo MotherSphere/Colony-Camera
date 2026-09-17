@@ -1,198 +1,232 @@
 # Camera Colony
 
-An independent third-person camera mod for Skyrim, with a Rust camera core and a
-C++ bridge built on CommonLibSSE-NG. Smooth movement, adjustable offsets and
-shoulder switching, while retaining Skyrim's native collision handling.
+An independent Skyrim camera plugin with a deterministic Rust core and a C++
+CommonLibSSE-NG bridge. **0.2.0 is a development candidate**, adding configurable
+third-person transitions, native settings menus and an opt-in first-person body
+experiment. It is not a complete SmoothCam or Improved Camera replacement.
 
-## Versions and source
+The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
+[0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
+remain the published historical release; its tag and binary are unchanged.
 
-- [0.1.2 alpha](https://github.com/MotherSphere/Colony-Camera/tree/v0.1.2) is the
-  source corresponding to the Nexus release. All 25 files were compared with
-  the source archive packaged with that build.
-- The default branch contains **0.1.3 diagnostic**, which adds sampled CPU
-  timing to investigate a reported slowdown without changing camera behavior.
-- Original project code is **GPL-3.0-or-later**. See [LICENSE](LICENSE) and
-  [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+## Candidate behavior and limits
 
-The plugin and configuration filenames remain `ColonyCamera.dll` and
-`ColonyCamera.ini`. This is an independent project, not a SmoothCam release or
-an implementation of its complete feature set.
+- Time-based third-person following with bounded lag, native collision, shoulder
+  switching and parent-aware camera publication. Position, camera-space offsets,
+  additional depth and world-FOV adjustment have independent half-lives.
+- Exploration, combat and aiming profiles, plus optional locomotion overrides.
+  Precedence is **aim > swimming > sneaking > sprinting > airborne > combat >
+  exploration**. Locomotion overrides are off in the supplied configuration.
+- One coordinator selects native, third-person or first-person ownership. Menus,
+  unavailable controls, furniture, mounts, transformations, ragdoll, death and
+  killmoves return to native behavior. First-person swimming and airborne states
+  also use native behavior. These fallbacks are not immersive support for those
+  actions; custom races and skeletons may also fall back conservatively.
+- Native modal settings pages with field/profile defaults, binding edits, save,
+  reload and Camera Colony presets. No SkyUI, Papyrus scripts, ESP or external
+  interface assets are required.
 
-## 0.1.2 distribution update
+The **first-person body experiment is off by default**. It attempts to display a
+conventional humanoid third-person body while retaining Skyrim's native camera
+and first-person arms. Head/third-person arm masking and equipment visibility
+are temporary, with restoration when the plugin still owns the changed values.
+Missing or replaced skeleton nodes cause a native fallback.
 
-[Download the corrected package and corresponding source](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2).
-The install ZIP retains the original DLL and INI and includes a consolidated
-`LICENSES.txt` plus a short `README.txt` linking to the exact corresponding source.
-It contains no source directories, checksum manifest or revision file.
-The full project/dependency source ZIP is a separate release asset.
-Upstream notices are also retained in `licenses/` in this repository.
-This is a packaging correction, not a camera behavior or version change.
+Body alignment, interiors, head/hair/helmet clipping, weapons, shields, torches,
+spell effects and shadows still need visual validation. Third-person arms,
+head-motion controls, independent hands FOV, near-plane adjustment and immersive
+furniture/mount/transformation/death/killmove handling are not implemented.
+There is no dynamic crosshair, projectile-origin reconciliation, ballistic
+prediction, trajectory display or third-party preset import mapping. Aiming
+defaults preserve the native camera; custom aiming displacement can reduce accuracy.
 
-## Features
+## Requirements and safe installation
 
-- Frame-rate-independent position smoothing with a maximum lag distance.
-- Separate exploration, weapon-drawn combat and aiming profiles.
-- Additional horizontal, depth and height offsets in camera space.
-- Native shoulder switching, with immediate restoration of Skyrim's settings.
-- Native collision handling after smoothing, retaining its correction.
-- Resets after loading, cell changes, teleports, entering third person and long
-  update interruptions.
-- Atomic configuration validation and on-demand INI reloading.
-- First-person, mounted, menu and dialogue camera states excluded from processing.
-- Automatic disabling when SmoothCam is loaded alongside this plugin.
+The only target is **Steam Skyrim 1.7.104.0**, **SKSE 2.3.1** and the matching
+Address Library. Other runtimes, GOG and VR are unsupported. Exact runtime and
+entry-point checks reject unexpected code before the affected hooks are installed.
 
-The aiming profile keeps the native position by default to preserve crosshair
-alignment. Changing it may affect aiming accuracy. This alpha does not include
-an MCM menu, a custom crosshair, projectile prediction or SmoothCam preset imports.
-Full compatibility with TDM, Improved Camera, dialogue systems or other camera
-managers is not guaranteed.
+1. Close Skyrim and back up your installed DLL and INI. Install the candidate as
+   a separate mod providing `SKSE/Plugins/ColonyCamera.dll` and `ColonyCamera.ini`.
+   Keep your existing INI; merge new fields or use the settings menu.
+2. Disable SmoothCam before testing: detecting `SmoothCam.dll` prevents Camera
+   Colony's camera hooks from installing. A detected `ImprovedCamera.dll` or
+   `ImprovedCameraSE.dll` disables only this plugin's first-person body experiment.
+   Other full camera providers are not comprehensively detected.
+3. Launch through SKSE when ready to test. Start with first-person body visibility
+   off. Enable it separately after checking ordinary third-person operation.
+4. Inspect `ColonyCamera.log` in the active SKSE log directory, normally under
+   `Documents/My Games/Skyrim Special Edition/SKSE`. Documents may be redirected;
+   Proton uses the game's actual prefix.
 
-## Requirements and installation
+TDM, SkyParkour, animation/skeleton changes, ENB, Community Shaders and body mods
+require separate compatibility tests. Hook chaining does not establish visual or
+behavioral compatibility. No mod-manager profile is changed automatically.
+To roll back, close Skyrim, disable the candidate and restore the backed-up DLL
+and INI. The plugin does not write camera settings into saves.
 
-The only supported target is **Skyrim Steam 1.7.104.0**, **SKSE 2.3.1** and the
-matching Address Library. The DLL rejects other runtimes. No ESP or Papyrus
-scripts are needed. The Windows x64 build has been observed working under Proton;
-this does not establish compatibility with every setup.
+## Settings and controls
 
-1. Close Skyrim, back up your configuration and disable SmoothCam and other full
-   third-person camera replacements. Improved Camera can remain enabled; its
-   collision hook is preserved.
-2. Install the chosen version with your mod manager. It must provide
-   `SKSE/Plugins/ColonyCamera.dll` and `SKSE/Plugins/ColonyCamera.ini`.
-3. Launch through SKSE and load a test save or start a new game.
-4. If the plugin refuses to load or has no visible effect, inspect
-   `Documents/My Games/Skyrim Special Edition/SKSE/ColonyCamera.log` inside the
-   appropriate Windows or Proton prefix.
-
-Default keyboard shortcuts, with menus closed and the camera in third person:
+With gameplay active and other menus closed:
 
 | Shortcut | Action |
 | --- | --- |
+| Ctrl+F7 | Open settings |
 | Ctrl+F8 | Toggle the effect |
-| Ctrl+F9 | Switch shoulders |
-| Ctrl+F10 | Reload the INI |
+| Ctrl+F9 | Switch shoulder |
+| Ctrl+F10 | Reload the saved INI |
 
-A shortcut used in first person is processed on the next transition to third
-person. Keys use SKSE scan codes; this alpha has no controller shortcuts. Toggle
-and shoulder changes are not written to the save or INI.
+Settings use Skyrim's modal message-box menu for focus and normal keyboard or
+controller navigation. The pages are **General, Third Person, First Person,
+Aiming, Presets, Compatibility and Diagnostics**. There is no controller opening
+chord or press-to-bind capture. General > Controls edits numeric SKSE keyboard
+scan codes; all shortcuts require Ctrl. The original F8/F9/F10 identities remain.
 
-In the INI, `x/y/z` are offsets added to the native camera, in game units, limited
-to +/-300. `half_life` is the time in seconds to halve the remaining error
-(0 means immediate). `max_lag` limits the distance from the requested position
-(0 means immediate). A shorter combat half-life gives a faster response. Default
-offsets are zero: smoothing is the main out-of-the-box effect.
+Numeric fields use Increase/Decrease and ten-step buttons. Changes apply in
+memory immediately. **General > Save settings** persists them by flushing a
+temporary file, then replacing the INI while keeping its previous version as
+`ColonyCamera.ini.bak`. Saving writes the canonical format; old comments remain
+in the backup. Reload rejects malformed files and retains active settings.
+Closing the menu alone does not save changes. Shoulder choice is session-only.
 
-To uninstall, close the game and disable the mod. No vanilla files, gameplay
-plugins or save data are modified.
+INI format 2 accepts older configurations without enabling new locomotion or
+first-person behavior. Missing `offset_half_life` inherits an explicitly supplied
+legacy `half_life`. Existing key remaps are retained; if an older binding already
+uses F7, an unused menu key is chosen. Unknown/duplicate fields, conflicting keys,
+non-finite numbers and out-of-range values reject the entire file.
 
-## Building
+| Profile setting | Meaning and accepted range |
+| --- | --- |
+| `x`, `y`, `z` | Added camera-space lateral/depth/height offset, -300 to 300 game units |
+| `half_life` | Position error half-life, 0 to 1 second; 0 follows immediately |
+| `max_lag` | Position lag cap, 0 to 300 game units; 0 removes following lag |
+| `offset_half_life` | Offset/profile/shoulder transition half-life, 0 to 1 second |
+| `zoom` | Additional camera-local depth, -300 to 300; added to `y`, preserving native zoom input |
+| `zoom_half_life` | Additional-depth transition half-life, 0 to 1 second |
+| `fov_offset` | World-FOV delta, -60 to 60 degrees; 0 requests native FOV |
+| `fov_half_life` | World-FOV delta transition half-life, 0 to 1 second |
+| `active` | Enable an optional sprint/sneak/swim/airborne override |
 
-Requirements: Rust/Cargo, Python 3, Git, CMake >=3.24 and C++23. Native dependency
-revisions are pinned in [dependencies.json](dependencies.json); their separate
-source checkouts live in `deps/`.
+Half-lives use exponential interpolation; there are no other easing modes.
+Nonzero FOV adjustments target 30-150 degrees, with smooth return to native FOV.
+Collision is applied after the requested third-person motion. Defaults use zero
+offsets, depth and FOV adjustments; the aiming profile also has zero lag.
 
-```sh
-python3 scripts/fetch-dependencies.py
-cargo test --locked
-cargo clippy --all-targets -- -D warnings
-rustup target add x86_64-pc-windows-msvc
-```
+Presets provides Balanced, Responsive and Native position profiles. Export writes
+`Data/SKSE/Plugins/ColonyCamera/Presets/User.ccpreset`; rename/copy that file to keep
+named presets. Import lists this folder and preserves your current bindings.
+The `.ccpreset` format is Camera Colony's versioned INI format. Importing applies
+settings in memory; General > Save persists them to the main INI.
 
-On Linux, install clang-cl, lld-link, llvm-lib, llvm-rc, llvm-mt and Ninja, plus an
-xwin sysroot containing `crt/` and `sdk/` (default: `~/.local/share/xwin`).
+## Building and checks
 
-```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/linux-xwin.cmake
-cmake --build build -j 8
-```
-
-On Windows, use a Visual Studio developer terminal with C++ tools and Cargo on PATH.
+Use Git, Python 3.11+, Rust/Cargo with the Windows MSVC target, CMake 3.24+ and a
+C++23 toolchain. Dependencies are pinned in [dependencies.json](dependencies.json).
 
 ```powershell
-cmake -S . -B build -A x64
-cmake --build build --config Release
+python scripts/fetch-dependencies.py
+rustup target add x86_64-pc-windows-msvc
+cargo fmt --check
+cargo test --locked
+cargo clippy --all-targets -- -D warnings
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
-To rebuild from a full source package, extract `colony-camera.tar.gz`, then
-extract `dependencies.tar.gz` inside the resulting `Colony-Camera` directory.
-These `deps/` folders contain source without Git metadata: skip
-`fetch-dependencies.py` and run CMake directly.
+On Windows, open an **x64 Visual Studio developer terminal** with the Windows SDK,
+Ninja and Cargo on PATH. CMake sets the required MSVC preprocessor/conformance and
+large-object options. The native baseline was built using MSVC 19.44 and Rust
+1.98.1 on Windows 11.
 
-CMake builds the Rust core automatically. Both languages use the static CRT.
-The Linux build path has been exercised; the Visual Studio path remains untested.
-The `camera_abi` and `camera_load` executables check the cross-language interface,
-binary guards and Windows DLL loading without starting Skyrim.
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl
+cmake --build build --config Release --parallel 2
+ctest --test-dir build -C Release --output-on-failure
+```
+
+For the Visual Studio generator, configure a separate directory with
+`cmake -S . -B build-vs -A x64`, then use `--config Release` for building and
+`-C Release` for CTest. CMake builds the Rust core automatically; both languages
+use the static CRT. The native test executables check ABI/layout and math,
+ownership/restoration and DLL loading/rejection without launching Skyrim.
+
+The existing Linux cross-build needs clang-cl, lld-link, llvm-lib, llvm-rc,
+llvm-mt, Ninja and an xwin sysroot containing `crt/` and `sdk/`:
 
 ```sh
-# Linux/Wine: use a test prefix separate from the game prefix.
-WINEPREFIX="$PWD/build/wine" wine build/camera_abi.exe
-WINEPREFIX="$PWD/build/wine" wine build/camera_load.exe "$(WINEPREFIX="$PWD/build/wine" winepath -w "$PWD/build/ColonyCamera.dll")"
-python3 scripts/verify-runtime.py /path/to/SkyrimSE.exe /path/to/versionlib-1-7-104-0.bin
-cmake --install build --prefix dist/staging
+cmake -S . -B build-cross -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/linux-xwin.cmake
+cmake --build build-cross --parallel 2
 ```
 
-## Provenance and license
+That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
+Its Windows test executables require Windows or a separate Wine test prefix.
+The 0.2.0 cross-build is not yet verified.
 
-Original project code is GPL-3.0-or-later. No SmoothCam source files, assets,
-scripts, menus or presets are included. Dependencies include CommonLibSSE-NG
-(alandtse and contributors), spdlog, DirectXMath and DirectXTK. Their revisions,
-licenses and credits are recorded in `dependencies.json` and
-`THIRD-PARTY-NOTICES.md`.
+Validate entry bytes, Address Library mappings and camera RTTI against a
+legitimate local game installation:
 
-Public [SmoothCam source](https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f3960ec4de2b28af5e863c794a3924e6a2dfdd)
-was studied to understand deferred camera integration and publication to NiCamera.
-The CommonLib bridge is implemented in this project. Inspecting engine entry
-points does not establish in-game correctness or comprehensive compatibility.
-The checks described above do not replace in-game testing.
+```powershell
+python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
+```
 
-When distributing the binary, provide this source link and the corresponding
-version, and retain the supplied license and third-party notices.
+The target executable/database pair passed all nine entry checks and two camera
+vtable RTTI checks. The candidate Windows x64 DLL built and loaded in the standalone
+harness. Rust tests, ABI, persistence, hook-guard, sampled-timing and packaging
+checks passed. **In-game menus, camera visuals and compatibility remain pending
+validation.** Runtime signatures and compilation cannot verify rendering.
 
-## Camera fixes
+Before using a candidate broadly, check new/load game, repeated POV switching,
+walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transitions,
+furniture/mounts/transformations/death, fast travel, toggle/reload and rollback.
+Confirm both ordinary visibility and restoration after disabling the body experiment.
 
-### 0.1.1
+## Reproducible candidate packaging
 
-The initial alpha stopped processing when another plugin intercepted camera
-functions. Hooks now install after loading or starting a game, preserving existing
-callbacks. The result is published to the camera state, scene root and render
-node, then the engine recalculates the projection matrix.
+Commit verified source changes first and use the same developer terminal:
 
-Logs distinguish hook installation, callback execution, the first applied frame
-and the first nonzero displacement. These messages are not emitted every frame.
-Animations without player control and killmoves retain native behavior.
+```powershell
+rustup component add rust-docs
+python scripts/package.py --build-dir build --config Release --output dist --jobs 2
+```
 
-### 0.1.2
+The script checks clean project/dependency revisions and metadata, performs a
+clean rebuild, then verifies x64 PE/SKSE exports and the DLL's plugin version.
+It creates a new version/commit-named output directory without replacing existing
+files. Its player ZIP contains only the DLL/INI under `SKSE/Plugins`, a short
+README with the exact source commit, and consolidated `LICENSES.txt`.
+Corresponding project/dependency sources, optional symbols and hashes are separate.
+Archive paths, contents and unchanged default INI are checked. Identical inputs
+use deterministic ZIP metadata; binary reproducibility is not claimed.
 
-The 0.1.1 callback ran after TDM/SkyParkour but rejected a missing NiCamera or a
-parented root under the same diagnostic. A parent is now allowed: its inverse
-transform produces the root's local position while preserving world positions
-and the render child's own offset. Invalid transforms leave positions unchanged.
-Logs distinguish a missing root, child types, invalid transforms and successful
-application. Improved Camera detection recognizes `ImprovedCamera.dll`.
-The user subsequently confirmed a visible effect; details are in the verification
-record. Restarting Skyrim is required after replacing the DLL.
+To build the supplied sources, extract `colony-camera.tar.gz`, then extract
+`dependencies.tar.gz` inside the resulting `Colony-Camera` folder. Skip dependency
+fetching because those source folders have no Git metadata, and run CMake directly.
+Packaging itself requires a Git checkout. The unused optional OpenVR submodule is
+not part of this SE/AE build. New Rust dependencies require source/notice bundling.
 
-## Performance diagnostics in 0.1.3
+This tool creates local candidates; it does not install or publish them. An
+authorized binary publication must include the matching public source download
+and intact notices. A local commit link is unavailable publicly until pushed.
 
-A user reported 200 FPS with the effect disabled versus 170 FPS while running
-and turning with it enabled. That report alone does not identify the source of
-the cost. This diagnostic version keeps camera behavior unchanged and measures
-one update in sixteen. It reports after 64 samples and when toggling Ctrl+F8;
-there is no per-frame performance logging.
+## Performance and provenance
 
-`PERF` separates enabled and disabled samples. `mean_us` reports microseconds:
-`own` excludes `previous_chain` (engine and other plugins); `collision`, `rust`
-and `scene` describe portions of the plugin's time. Averages cover every sample
-in the block, including samples with no effect; `applied` counts published
-positions. `peak_own_us` is a sampled maximum, not a guaranteed worst frame or a
-percentile.
+Sampled `PERF` logs separate first/third-person and enabled/disabled callback CPU
+work from the preceding hook chain, with collision, Rust and scene stages. Every
+sixteenth callback is sampled; reports include p50/p95/p99 of up to 64 sampled
+own-time values. These are callback samples, not complete-frame percentiles.
+The logs do not measure complete frame time, GPU body-render cost or unsampled
+worst-case spikes. Instrumentation overhead has not been calibrated.
+No fresh candidate FPS or compatibility benchmark is claimed. Compare native,
+baseline and candidate using repeated matched routes, warmup and frame-time tails;
+measure first person and third person separately.
 
-For comparison, run and turn for twenty seconds, toggle Ctrl+F8, repeat the same
-route for twenty seconds, then re-enable. Avoid menus, loading and configuration
-changes during the comparison, and include `ColonyCamera.log` with your report.
+Original project code is **GPL-3.0-or-later**. See [LICENSE](LICENSE) and
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). CommonLibSSE-NG's additional
+permissions and upstream credits are retained. Other pinned dependencies include
+spdlog, DirectXMath and DirectXTK; Rust runtime notices match the build toolchain.
 
-These wall-clock timings include possible OS interruptions. They measure neither
-GPU cost nor complete frame time. Command handling and reports outside the probe
-are excluded. The instrumentation has an uncalibrated cost of its own: it helps
-locate overhead, but does not certify an FPS loss.
+[SmoothCam](https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f3960ec4de2b28af5e863c794a3924e6a2dfdd)
+and [Improved Camera SE-NG](https://github.com/ArranzCNL/ImprovedCameraSE-NG/tree/2e441c190e46d96eefb7738a3276308e9c36e939)
+were inspected as functional/engine references. Their implementation, translated
+code, scripts, UI, assets and presets are not included. This is independently
+maintained code; source inspection is disclosed without a clean-room claim.
