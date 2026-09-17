@@ -22,7 +22,7 @@ plugins = stage / "SKSE/Plugins"
 plugins.mkdir(parents=True)
 for source in [root / "build/ColonyCamera.dll", root / "assets/SKSE/Plugins/ColonyCamera.ini"]:
     shutil.copy2(source, plugins / source.name)
-for source, destination in [("README.md", "LISEZ-MOI.txt"), ("LICENSE", "LICENSE.txt"), ("THIRD-PARTY-NOTICES.md", "THIRD-PARTY-NOTICES.txt")]:
+for source, destination in [("README.md", "README.txt"), ("LICENSE", "LICENSE.txt"), ("THIRD-PARTY-NOTICES.md", "THIRD-PARTY-NOTICES.txt")]:
     shutil.copy2(root / source, stage / destination)
 sources = stage / "Sources"
 sources.mkdir()

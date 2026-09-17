@@ -1,176 +1,178 @@
-# Vérification de Colony Camera
+# Colony Camera verification
 
-## Historique : 0.1 alpha (avant essai utilisateur)
+This is a historical record. Each section describes the evidence available at
+that stage, not a claim that all later versions received the same validation.
 
-Date : 17 septembre 2026. Pas de test en jeu effectué. Installation Eidos intacte.
+## Historical: 0.1 alpha, before the user's test
 
-## Contrôles exécutés
+Date: September 17, 2026. No in-game test had been performed. The Eidos
+installation was unchanged.
 
-- Six tests Rust : convergence et indépendance 30/60/144 FPS, retard maximal,
-  téléportation, longues pauses, rotation des décalages, entrées invalides,
-  configuration atomique, doublons, valeurs hors bornes, modificateur Ctrl réservé.
-- `cargo clippy --all-targets -- -D warnings` et `cargo fmt --check`.
-- Compilation complète de CommonLib et du plugin en Windows x64 avec clang-cl,
-  SDK/CRT xwin et moteur Rust MSVC. Aucune dépendance Rust tierce.
-- Exécutable C++ `camera_abi.exe` lancé sous Wine : structures échangées par valeur,
-  configuration valide/invalide, conservation de la sortie en cas d'erreur,
-  refus des pointeurs nuls et test de mutation de chaque octet des quatre gardes.
-- `camera_load.exe` sous Wine : chargement réel de la DLL et de ses dépendances,
-  présence des exports SKSEPlugin_Load / SKSEPlugin_Version, refus propre d'une
-  interface SKSE nulle. Cela ne simule pas le chargement SKSE dans Skyrim.
-- Vérification en lecture seule de SkyrimSE.exe et de l'Address Library : slots
-  Begin/End/Update 1/2/3 de la vtable 205236 et entrée collision 50832. Préfixes
-  binaires concordants. Les mêmes gardes sont appliqués avant installation des hooks.
+### Checks performed
 
-Empreintes des fichiers du jeu lus pour cette vérification :
+- Six Rust tests: convergence and independence at 30/60/144 FPS, maximum lag,
+  teleports, long pauses, rotated offsets, invalid input, atomic configuration,
+  duplicate entries, out-of-range values and the reserved Ctrl modifier.
+- `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check`.
+- Full CommonLib and plugin compilation for Windows x64 with clang-cl, the xwin
+  SDK/CRT and the Rust MSVC core. No third-party Rust dependencies.
+- `camera_abi.exe` under Wine: structures passed by value, valid/invalid
+  configuration, unchanged output on failure, null-pointer rejection and mutation
+  testing of every byte in the four binary guards.
+- `camera_load.exe` under Wine: actual DLL and dependency loading, presence of
+  SKSEPlugin_Load / SKSEPlugin_Version exports and clean rejection of a null SKSE
+  interface. This does not simulate SKSE loading inside Skyrim.
+- Read-only checks of SkyrimSE.exe and Address Library: Begin/End/Update slots
+  1/2/3 in vtable 205236 and collision entry 50832. Binary prefixes matched. In
+  0.1, those guards were also applied before installing hooks.
 
-- SkyrimSE.exe : `846efccf0c1374d71f892907f46549560f2fcb0a75cb87a3eed438baa0f1402f`
-- Address Library : `8aab3dd251d135b849bd983f86a4a205c920fa3e81f8e30c0e63ccfef9423842`
+Hashes of the game files read during verification:
 
-La compilation émet des avertissements dans les en-têtes de CommonLib.
-Wine émet des avertissements Mesa dans ce préfixe de test sans rendu graphique ;
-les deux exécutables de contrôle terminent avec le code 0.
+- SkyrimSE.exe: `846efccf0c1374d71f892907f46549560f2fcb0a75cb87a3eed438baa0f1402f`
+- Address Library: `8aab3dd251d135b849bd983f86a4a205c920fa3e81f8e30c0e63ccfef9423842`
 
-## Relecture
+The build emitted warnings in CommonLib headers. Wine emitted Mesa warnings in
+this non-rendering test prefix; both verification executables exited with code 0.
 
-Une relecture indépendante a identifié l'absence de restauration lors d'End,
-la vérification trop précoce des conflits et la possibilité d'affecter Ctrl seul
-à une action. Ces points ont été corrigés : restauration sur End et Begin,
-revérification PostPostLoad/DataLoaded et refus des codes 29/157.
-La restauration précède la réinitialisation et n'a lieu que si la position et
-l'objet correspondent encore exactement à la dernière sortie appliquée par
-Colony Camera ; une position déjà changée par le moteur n'est pas écrasée.
-Le profil de visée natif ne lance pas de seconde collision. Une entrée invalide
-invalide le résultat Rust et laisse la position native en place.
+### Review
 
-## Limites et essai requis
+Independent review found missing restoration on End, conflict checks performed
+too early and the ability to bind Ctrl alone to an action. Fixes added restoration
+on End and Begin, rechecking at PostPostLoad/DataLoaded, and rejection of codes
+29/157. Restoration precedes reset and runs only when the object and position
+still exactly match Colony Camera's last applied output. It does not overwrite a
+position already changed by the engine. The native aiming profile does not run a
+second collision. Invalid input invalidates the Rust result and leaves the native
+position intact.
 
-La sémantique complète de CheckCameraCollision après une position filtrée n'est
-pas prouvée par son ABI ou ses préfixes. La dernière position acceptée est renvoyée
-au filtre, mais les obstacles mobiles, angles et escaliers demandent un essai réel.
-L'ordre du moteur, le sens des axes locaux et l'inversion de l'épaule doivent
-également être confirmés visuellement. Pas de mesure des performances en jeu.
+### Limitations and required testing at this stage
 
-Les conflits détectés couvrent SmoothCam et les entrées natives/vtables surveillées
-aux étapes de chargement. Un plugin qui modifie la caméra ailleurs ou plus tard
-peut encore être incompatible. Aucune promesse de compatibilité globale.
+The ABI and prefixes do not prove the complete semantics of CheckCameraCollision
+after filtering. The accepted position is fed back to the filter, but moving
+obstacles, corners and stairs require actual gameplay tests. Engine ordering,
+local-axis direction and shoulder inversion also require visual confirmation.
+There were no in-game performance measurements at this stage.
 
-Scénarios à vérifier avant publication stable : chargement d'une sauvegarde,
-marche/course/rotation, murs et passages étroits, première/troisième personne,
-dialogue, inventaire et console, changement de cellule, voyage rapide, mort,
-monture, arc/arbalète et magie, changement d'épaule et bascule/rechargement INI.
-Observer notamment le réticule en visée et comparer les FPS avec le mod désactivé.
-Conserver la DLL et son PDB correspondant lors de la collecte d'un crash log.
+Conflict checks covered SmoothCam and the monitored native/vtable entries during
+loading. Plugins changing the camera elsewhere or later could still conflict.
+No comprehensive compatibility guarantee was made.
 
-## Fonctionnalités restantes
+Before stable publication, test save loading, walking/running/turning, walls and
+narrow passages, first/third-person transitions, dialogue, inventory and console,
+cell changes, fast travel, death, mounts, bows/crossbows and magic, shoulder
+switching, toggling and INI reloads. Watch the aiming crosshair and compare FPS
+with the effect disabled. Keep the DLL and its matching PDB when collecting a
+crash log.
 
-Menu MCM, réticule et trajectoire propres, compatibilités inter-mods testées,
-prise en charge de plusieurs runtimes et presets avancés. Cette alpha n'est pas
-un remplacement complet de toutes les fonctions de SmoothCam.
+### Remaining features
 
-## Paquet livré
+MCM, custom crosshair and trajectory rendering, tested inter-mod compatibility,
+multiple runtimes and advanced presets. This alpha is not a complete replacement
+for every SmoothCam feature.
 
-Archive `Colony Camera 0.1 alpha.zip` produite depuis le commit `76389e0`,
-contenant la DLL, l'INI, les notices et les sources du projet et des dépendances.
-ZIP et chaque fichier du manifeste SHA256 vérifiés après copie sur le Bureau.
-SHA256 ZIP : `b25f40179bbeec7a70b79ff998c3d065f2675f5452dadfc1260dcff5870a3940`.
-Le PDB correspondant est conservé à côté du ZIP, hors installation du mod.
-Aucune installation Eidos, publication distante ou upload Nexus réalisé.
+### Delivered package
 
-## Correctif 0.1.1 — 17 septembre 2026
+`Colony Camera 0.1 alpha.zip` was built from `76389e0`, containing the DLL, INI,
+notices and project/dependency sources. The ZIP and each SHA256 manifest entry
+were verified after copying to the Desktop.
+ZIP SHA256: `b25f40179bbeec7a70b79ff998c3d065f2675f5452dadfc1260dcff5870a3940`.
+The matching PDB was retained beside the ZIP, outside the mod installation.
+No Eidos installation, remote publication or Nexus upload occurred at that stage.
 
-L’essai utilisateur de 0.1 a confirmé le chargement de la DLL, mais aucun effet
-visible : le journal bloquait le traitement lors des changements d’entrées.
-Improved Camera intercepte précisément l’entrée collision ; le refus persistait
-également sans ce mod. L’identité du second déclencheur n’est pas établie.
-Les anciennes affirmations de garde runtime ci-dessus décrivent 0.1, pas 0.1.1.
+## 0.1.1 fix — September 17, 2026
 
-Correction : installation sur PostLoadGame/NewGame, chaînage des slots présents,
-validation d’adresses exécutables sans exiger des octets vierges, publication dans
-les positions de la racine et du nœud NiCamera, recalcul de la matrice (AE 70641).
-Ce dernier point d’entrée a été lu dans l’exécutable réel et ajouté au vérificateur
-hors ligne, qui contrôle désormais cinq entrées. Les hooks collision d’Improved
-Camera restent traversés ; aucune interception n’est contournée par une adresse
-vanilla mémorisée avant son installation.
+The user's 0.1 test confirmed DLL loading but no visible effect: logs showed
+processing stopped when entry points changed. Improved Camera hooks the collision
+entry; rejection also persisted without that mod. The second trigger was not
+identified. The runtime-guard claims above describe 0.1, not 0.1.1.
 
-Tests : les six tests Rust, Clippy, formatage, ABI C++ et chargement DLL sous Wine
-passent. Le test C++ de publication contrôle les quatre positions, préserve le
-décalage propre à l’enfant NiCamera et vérifie qu’une seconde publication identique
-ne cumule pas le déplacement. Son introduction a échoué avant implémentation
-(helper absent), puis passé après implémentation. Le démarrage de Skyrim, les
-collisions et les animations Improved Camera exigent toujours un test en jeu.
+The fix installs at PostLoadGame/NewGame, chains existing slots, validates
+executable addresses without demanding unmodified bytes, publishes root and
+NiCamera positions, and recalculates the matrix through AE 70641. That entry was
+read from the actual executable and added to the offline verifier, bringing it
+to five entries. Improved Camera's collision hooks remain in the call path; no
+hook is bypassed through a vanilla address captured before installation.
 
-La relecture du correctif a confirmé le chaînage, la signature et l’écriture de
-la collision, ainsi que la publication du rendu. Elle a identifié une exclusion
-de zoom trop large : les valeurs négatives restent valides en troisième personne.
-Ce seuil a été retiré ; aucune plage native de zoom n’est arbitrairement exclue.
+The six Rust tests, Clippy, formatting, C++ ABI and Wine DLL loading passed. The
+C++ publication test checks four positions, preserves the NiCamera child's own
+offset and verifies that repeated identical publication does not accumulate
+movement. It failed before implementation because the helper was absent, then
+passed. Skyrim startup, collision and Improved Camera animations still required
+in-game testing.
 
-### Livraison du correctif
+Review confirmed chaining, the collision signature and writes, and render
+publication. It found an overly broad zoom exclusion: negative zoom values remain
+valid in third person. The threshold was removed; no native zoom range is
+arbitrarily excluded.
 
-Commit du paquet : `e94c5d0`, branche locale `camera-initiale`, sans push ni merge.
-DLL 0.1.1 installée jeu fermé dans le dossier existant Eidos
-`Colony Camera 0.1 alpha/SKSE/Plugins`, INI conservé à l’identique.
-Sauvegarde DLL/INI/logs : `dist/backups/20260917-005754`.
-Improved Camera reste activé ; SmoothCam reste désactivé.
-SHA256 DLL installée : `2458f6c78d52c02e2645f0286736ff52e2ad63974a9fb6ed913c05395a691794`.
-ZIP et PDB 0.1.1 copiés sur le Bureau dans `Mods créés/Colony Camera`, sans
-écraser le paquet 0.1. SHA256 ZIP :
+### Delivery
+
+Package commit: `e94c5d0`, local branch `camera-initiale`, with no push or merge at
+that time. DLL 0.1.1 was installed with Skyrim closed into the existing Eidos
+`Colony Camera 0.1 alpha/SKSE/Plugins` folder. The INI remained byte-identical.
+DLL/INI/log backup: `dist/backups/20260917-005754`.
+Improved Camera remained enabled and SmoothCam disabled.
+Installed DLL SHA256: `2458f6c78d52c02e2645f0286736ff52e2ad63974a9fb6ed913c05395a691794`.
+The 0.1.1 ZIP and PDB were copied to the Desktop folder `Mods créés/Colony Camera`,
+without overwriting 0.1. ZIP SHA256:
 `07014b30f51e012a319167ae37aa4d3e17c64a07e787bd24c379c693dad44cb1`.
-Pas encore de journal issu d’un lancement en jeu de 0.1.1.
+No in-game 0.1.1 log was available yet.
 
-## Correctif 0.1.2 — 17 septembre 2026
+## 0.1.2 fix — September 17, 2026
 
-Log utilisateur de 01:06–01:08 : chargement réussi, chaînage Begin vers TDM,
-End/Update vers SkyParkour, callback atteint, puis refus « Camera render node
-missing or root parented ». Aucun déplacement confirmé. Improved Camera chargé
-selon SKSE malgré notre faux négatif : fichier ImprovedCamera.dll.
+The user's 01:06–01:08 log showed successful loading, Begin chaining to TDM,
+End/Update chaining to SkyParkour and callback execution, followed by rejection:
+"Camera render node missing or root parented". No displacement was confirmed.
+SKSE showed Improved Camera loaded despite our false negative; its filename is
+`ImprovedCamera.dll`.
 
-Investigation : GetRTTI de NiCamera dans la vtable AE 237191 pointe sur
-0x140EF1A50 ; l’instruction LEA renvoie bien 0x14331C690, soit l’adresse AE
-410506 attendue par netimmerse_cast. Ce contrôle exclut un mauvais identifiant
-CommonLib pour le type natif, sans prouver la structure de la scène de cette
-session. Aucun processus Skyrim n’était encore disponible pour lire la scène.
+Investigation found NiCamera's GetRTTI in vtable AE 237191 at 0x140EF1A50. Its LEA
+instruction returns 0x14331C690, matching AE 410506 expected by netimmerse_cast.
+This ruled out an incorrect CommonLib identifier for the native type, but did
+not establish that session's scene structure. Skyrim was no longer running, so
+the live scene could not be inspected.
 
-Suppression du refus systématique d’un parent ; conversion monde→local via
-NiTransform::Invert, publication atomique si positions finies. Tests C++ :
-parent décalé (100,200,300), rotation de 90° et échelle 2, résultat local
-attendu (20,10,30) pour le monde (80,240,360), décalage enfant conservé,
-rejet d’échelle nulle sans écriture. Test introduit avant le support du parent
-(compilation refusée pour l’argument absent), puis exécuté sous Wine.
-La compilation et les six tests Rust, Clippy et formatage passent ; le
-chargement DLL et l’ABI sont contrôlés sous Wine. Validation en jeu restante.
+The unconditional parent rejection was removed. World-to-local conversion uses
+NiTransform::Invert, with atomic publication only for finite positions. C++ tests
+cover a parent translated by (100,200,300), rotated 90 degrees and scaled by 2:
+world (80,240,360) must produce local (20,10,30), preserving the child offset.
+Zero scale is rejected without writes. The test was introduced before parent
+support, failed compilation because the argument was absent, then ran under Wine.
+The Windows build, six Rust tests, Clippy and formatting passed; DLL loading and
+the ABI were checked under Wine. In-game validation was still pending then.
 
-Si NiCamera reste absente, le nouveau journal donne le parent, le nombre de
-slots enfants et leurs types. Ne pas présenter l’hypothèse du parent comme
-un fait mesuré dans la session 0.1.1 : son journal regroupait les deux causes.
+If NiCamera is absent, the new diagnostics report the parent, child-slot count
+and types. The parent hypothesis must not be treated as an observed fact in the
+0.1.1 session: its diagnostic combined two possible causes.
 
-Relecture indépendante : aucun défaut bloquant trouvé. Le complément conseillé
-a été ajouté : parent avec translation NaN, rejet après calcul, comparaison
-des douze composantes avant/après pour exclure une écriture partielle.
+Independent review found no blocking defect. A suggested additional test was
+added: a parent with NaN translation is rejected after calculation, comparing all
+twelve position components before and after to rule out partial writes.
 
-Livraison 0.1.2 depuis f3a1e9b : DLL remplacée dans le dossier Eidos existant,
-jeu fermé, INI inchangé ; sauvegarde `dist/backups/20260917-011459`.
-Reçu vérifié : `dist/installation-0.1.2.json`. ZIP/PDB sur le Bureau, versions
-précédentes conservées ; ZIP SHA256
+Delivery from `f3a1e9b`: DLL replaced in the existing Eidos folder with the game
+closed and the INI unchanged; backup `dist/backups/20260917-011459`.
+Verified receipt: `dist/installation-0.1.2.json`. ZIP/PDB copied to the Desktop,
+older versions retained. ZIP SHA256:
 `3608ef9284a095ae50bb005854928e3faeb6a1468493e3d0d68137c030285405`.
-Aucun push, merge ou lancement de Skyrim. Nouveau test utilisateur requis.
+No push, merge or Skyrim launch was performed during delivery. Another user test
+was required.
 
-## Diagnostic 0.1.3 — ralentissement rapporté
+## 0.1.3 diagnostic — reported slowdown
 
-0.1.2 : fonctionnement visuel confirmé par l’utilisateur et par le log de
-01:16:53 (parent présent, position appliquée), déplacement non nul à 01:16:56.
-Le blocage de scène est donc levé dans cette session. L’utilisateur rapporte
-ensuite une chute de 200 à 170 FPS en rotation/course, absente avec Ctrl+F8 off.
-Différence de temps par image correspondante : 5 ms contre 5,88 ms environ.
+The user confirmed a visible effect in 0.1.2. The 01:16:53 log recorded a parent
+and an applied position, followed by nonzero displacement at 01:16:56. The scene
+blocker was therefore resolved in that session. The user then reported a drop
+from 200 to 170 FPS while running and turning, absent with Ctrl+F8 off. Those
+rates correspond to approximately 5 ms and 5.88 ms per frame.
 
-Instrumentation échantillonnée de l’Update : temps total mesuré moins callback
-précédent, seconde collision, calcul Rust, publication/matrice. Bacs séparés
-activé/désactivé, bilan tous les 64 échantillons sur une image sur seize.
-Ce n’est pas une optimisation livrée ni une mesure des FPS/GPU. Les petits coûts
-avant la sonde et la sortie des journaux ne sont pas inclus dans `own`.
+Sampled Update instrumentation measures total time minus the previous callback,
+second collision, Rust calculation and scene/matrix publication. Enabled and
+disabled samples are separate, reporting every 64 samples from one frame in
+sixteen. This is diagnostic instrumentation, not an optimization or an FPS/GPU
+measurement. Small costs before the probe and log output are excluded from `own`.
 
-Test C++ ajouté avant le helper : exclusion de la chaîne précédente, moyenne,
-compteur d’images appliquées, maximum et remise à zéro sur durées synthétiques.
-Compilation Windows, six tests Rust/Clippy/formatage et exécutables ABI/chargement
-sous Wine vérifiés. Aucun changement des positions, du lissage ou des collisions.
-Prochaine étape : lire les bilans PERF du test A/B avant de choisir une optimisation.
+A C++ test was added before the helper to check previous-chain exclusion,
+averages, applied-frame counts, maximum and reset using synthetic durations.
+The Windows build, six Rust tests, Clippy, formatting and Wine ABI/loading tests
+passed. Camera positions, smoothing and collisions were unchanged. The next step
+at that stage was to read the A/B PERF reports before choosing an optimization.

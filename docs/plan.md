@@ -1,13 +1,13 @@
-# Colony Camera Implementation Plan
+# Colony Camera implementation plan
 
-**Goal:** produire une alpha indépendante compilable de caméra fluide.
-**Architecture:** moteur Rust pur, passerelle C++ CommonLibSSE-NG, collision native finale.
-**Tech Stack:** Cargo, C++23, CMake, clang-cl/MSVC.
-**Spec:** design.md (architecture approuvée dans la conversation).
+**Goal:** build an independent, compilable smooth-camera alpha.
+**Architecture:** pure Rust core, C++ CommonLibSSE-NG bridge, final native collision.
+**Tech stack:** Cargo, C++23, CMake, clang-cl/MSVC.
+**Specification:** [design.md](design.md), approved during development.
 
-- [x] Écrire les tests de convergence, FPS, invalides et téléportation dans tests/camera.rs, constater les échecs avec cargo test.
-- [x] Implémenter src/lib.rs : interpolation, transformations, bornes et configuration stricte ; cargo test et clippy -D warnings.
-- [x] Écrire plugin/main.cpp et plugin/core.h : ABI C, hooks Update/Begin/End chaînés, collision finale, profils, raccourcis, refus runtime inconnu.
-- [x] Construire avec CommonLibSSE-NG épinglé et dépendances sous leur licence ; CMake source + Cargo Windows.
-- [x] Vérifier ABI, exports PE, points d'accroche du SkyrimSE.exe local et packaging ; conserver les résultats dans docs/verification.md.
-- [x] Committer chaque étape cohérente, préparer une archive alpha et documenter les tests en jeu restant à effectuer. Pas de push ni d'installation automatique.
+- [x] Write convergence, frame-rate, invalid-input and teleport tests in `tests/camera.rs`; observe failures with `cargo test`.
+- [x] Implement `src/lib.rs`: interpolation, transforms, bounds and strict configuration; run `cargo test` and `clippy -D warnings`.
+- [x] Write `plugin/main.cpp` and `plugin/core.h`: C ABI, chained Update/Begin/End hooks, final collision, profiles, shortcuts and rejection of unknown runtimes.
+- [x] Build with pinned CommonLibSSE-NG and dependencies under their respective licenses; use CMake source builds and Cargo for Windows.
+- [x] Verify the ABI, PE exports, hook points in the local `SkyrimSE.exe` and packaging; record results in `docs/verification.md`.
+- [x] Commit coherent steps, prepare an alpha archive and document remaining in-game tests. The initial plan did not authorize automatic installation or pushing; later installations and public publication were separately requested.

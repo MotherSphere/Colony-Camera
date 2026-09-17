@@ -1,79 +1,85 @@
-# Colony Camera
+# Camera Colony
 
-## Public source and license
+An independent third-person camera mod for Skyrim, with a Rust camera core and a
+C++ bridge built on CommonLibSSE-NG. Smooth movement, adjustable offsets and
+shoulder switching, while retaining Skyrim's native collision handling.
 
-Source code for **Camera Colony** on Nexus is published here under
-**GPL-3.0-or-later**; the complete license is in [LICENSE](LICENSE).
+## Versions and source
 
-- [0.1.2 alpha source](https://github.com/MotherSphere/Colony-Camera/tree/v0.1.2):
-  matches all 25 files in the source archive packaged with the 0.1.2 build.
-- The default branch contains the later **0.1.3 diagnostic** code and documentation.
-- Build instructions are below. [dependencies.json](dependencies.json) pins the
-  public source revisions of all four native dependencies; run
-  `python3 scripts/fetch-dependencies.py` to retrieve them.
-- Dependency licenses and credits remain applicable; see
+- [0.1.2 alpha](https://github.com/MotherSphere/Colony-Camera/tree/v0.1.2) is the
+  source corresponding to the Nexus release. All 25 files were compared with
+  the source archive packaged with that build.
+- The default branch contains **0.1.3 diagnostic**, which adds sampled CPU
+  timing to investigate a reported slowdown without changing camera behavior.
+- Original project code is **GPL-3.0-or-later**. See [LICENSE](LICENSE) and
   [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-When sharing the Nexus binary, include this source link and the corresponding
-version, and retain the license and third-party notices supplied with the mod.
+The plugin and configuration filenames remain `ColonyCamera.dll` and
+`ColonyCamera.ini`. This is an independent project, not a SmoothCam release or
+an implementation of its complete feature set.
 
-Mod de caméra indépendant pour Skyrim, écrit en Rust avec une passerelle C++
-CommonLibSSE-NG. **Version 0.1.3 diagnostic : mesure du coût CPU après validation visuelle de 0.1.2.** Ce n'est pas une version de SmoothCam ni une copie de son code.
+## Features
 
-## Fonctionnalités de cette alpha
+- Frame-rate-independent position smoothing with a maximum lag distance.
+- Separate exploration, weapon-drawn combat and aiming profiles.
+- Additional horizontal, depth and height offsets in camera space.
+- Native shoulder switching, with immediate restoration of Skyrim's settings.
+- Native collision handling after smoothing, retaining its correction.
+- Resets after loading, cell changes, teleports, entering third person and long
+  update interruptions.
+- Atomic configuration validation and on-demand INI reloading.
+- First-person, mounted, menu and dialogue camera states excluded from processing.
+- Automatic disabling when SmoothCam is loaded alongside this plugin.
 
-- Lissage de position indépendant de la fréquence d'images, avec retard maximal.
-- Trois profils : exploration, arme dégainée, visée (arc/arbalète dégainé ou magie).
-- Décalages supplémentaires horizontal, profondeur et hauteur dans l'espace caméra.
-- Inversion de l'épaule native, avec restauration immédiate des réglages Skyrim.
-- Collision native exécutée après le lissage, avec conservation de sa correction.
-- Réinitialisation après chargement, changement de cellule, téléportation,
-  entrée en troisième personne et longue interruption de mise à jour.
-- Configuration INI rechargée à la demande, validée en entier avant application.
-- Première personne, montures, menus et dialogues exclus du traitement.
-- Détection de SmoothCam chargé simultanément : Colony Camera reste inactif.
+The aiming profile keeps the native position by default to preserve crosshair
+alignment. Changing it may affect aiming accuracy. This alpha does not include
+an MCM menu, a custom crosshair, projectile prediction or SmoothCam preset imports.
+Full compatibility with TDM, Improved Camera, dialogue systems or other camera
+managers is not guaranteed.
 
-Le profil de visée ne déplace ni ne lisse la caméra par défaut, pour conserver
-l'alignement natif du réticule. Changer ce profil peut modifier la précision de
-visée. Le menu MCM, le réticule personnalisé, la trajectoire des projectiles et
-l'import de presets SmoothCam ne sont pas implémentés. Aucun support complet de
-TDM, Improved Camera, systèmes de dialogue ou autres gestionnaires n'est revendiqué.
+## Requirements and installation
 
-## Dépendances et installation de test
+The only supported target is **Skyrim Steam 1.7.104.0**, **SKSE 2.3.1** and the
+matching Address Library. The DLL rejects other runtimes. No ESP or Papyrus
+scripts are needed. The Windows x64 build has been observed working under Proton;
+this does not establish compatibility with every setup.
 
-Cible unique : **Skyrim Steam 1.7.104.0**, SKSE **2.3.1** et Address Library
-pour cette version. La DLL refuse les autres versions. Aucun ESP ni script
-Papyrus nécessaire. Compilation Windows x64 ; chargement initial observé sous Proton, rendu du correctif à vérifier.
+1. Close Skyrim, back up your configuration and disable SmoothCam and other full
+   third-person camera replacements. Improved Camera can remain enabled; its
+   collision hook is preserved.
+2. Install the chosen version with your mod manager. It must provide
+   `SKSE/Plugins/ColonyCamera.dll` and `SKSE/Plugins/ColonyCamera.ini`.
+3. Launch through SKSE and load a test save or start a new game.
+4. If the plugin refuses to load or has no visible effect, inspect
+   `Documents/My Games/Skyrim Special Edition/SKSE/ColonyCamera.log` inside the
+   appropriate Windows or Proton prefix.
 
-1. Sauvegarder sa configuration, fermer Skyrim et désactiver SmoothCam ainsi que
-   les autres remplaçants complets de la caméra à la troisième personne. Improved Camera
-   peut rester activé pour cet essai : son interception des collisions est conservée.
-2. Installer le dossier `Colony Camera 0.1.3 diagnostic` dans un gestionnaire de mods.
-   Il doit contenir `SKSE/Plugins/ColonyCamera.dll` et `ColonyCamera.ini`.
-3. Lancer Skyrim via SKSE et tester sur une sauvegarde de test.
-4. Consulter `Documents/My Games/Skyrim Special Edition/SKSE/ColonyCamera.log`
-   dans le préfixe Windows/Proton concerné en cas de refus ou d'absence d'effet.
+Default keyboard shortcuts, with menus closed and the camera in third person:
 
-Raccourcis par défaut (clavier, lorsque les menus sont fermés et la caméra est à
-la troisième personne) : **Ctrl+F8** activation, **Ctrl+F9** épaule,
-**Ctrl+F10** rechargement INI. Un raccourci utilisé en première personne sera
-traité au prochain passage en troisième personne. Touches configurables par code
-clavier SKSE ; aucun raccourci manette dans cette alpha. L'état d'activation et
-l'épaule changés au clavier ne sont pas écrits dans la sauvegarde ou dans l'INI.
+| Shortcut | Action |
+| --- | --- |
+| Ctrl+F8 | Toggle the effect |
+| Ctrl+F9 | Switch shoulders |
+| Ctrl+F10 | Reload the INI |
 
-`x/y/z` sont des ajouts à la caméra native, en unités du jeu, limités à ±300.
-`half_life` est le temps en secondes pour diviser l'erreur restante par deux
-(0 = immédiat). `max_lag` limite la distance à la position demandée (0 = immédiat).
-En combat, une demi-vie plus courte donne une réponse plus rapide. Les valeurs
-par défaut ne déplacent pas la caméra ; elles ajoutent seulement son lissage.
+A shortcut used in first person is processed on the next transition to third
+person. Keys use SKSE scan codes; this alpha has no controller shortcuts. Toggle
+and shoulder changes are not written to the save or INI.
 
-Pour désinstaller : fermer le jeu et désactiver le dossier du mod. Aucun fichier
-vanilla, plugin de gameplay ou donnée de sauvegarde n'est modifié.
+In the INI, `x/y/z` are offsets added to the native camera, in game units, limited
+to +/-300. `half_life` is the time in seconds to halve the remaining error
+(0 means immediate). `max_lag` limits the distance from the requested position
+(0 means immediate). A shorter combat half-life gives a faster response. Default
+offsets are zero: smoothing is the main out-of-the-box effect.
 
-## Compilation
+To uninstall, close the game and disable the mod. No vanilla files, gameplay
+plugins or save data are modified.
 
-Rust/Cargo, Python 3, Git, CMake >=3.24, C++23. Dépendances épinglées dans
-`dependencies.json`; leurs sources restent séparées sous `deps/`.
+## Building
+
+Requirements: Rust/Cargo, Python 3, Git, CMake >=3.24 and C++23. Native dependency
+revisions are pinned in [dependencies.json](dependencies.json); their separate
+source checkouts live in `deps/`.
 
 ```sh
 python3 scripts/fetch-dependencies.py
@@ -82,8 +88,8 @@ cargo clippy --all-targets -- -D warnings
 rustup target add x86_64-pc-windows-msvc
 ```
 
-Sous Linux : clang-cl, lld-link, llvm-lib, llvm-rc, llvm-mt, Ninja et un sysroot
-xwin contenant `crt/` et `sdk/` (par défaut `~/.local/share/xwin`).
+On Linux, install clang-cl, lld-link, llvm-lib, llvm-rc, llvm-mt and Ninja, plus an
+xwin sysroot containing `crt/` and `sdk/` (default: `~/.local/share/xwin`).
 
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -91,97 +97,92 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build -j 8
 ```
 
-Sous Windows : terminal Visual Studio avec outils C++ et Cargo sur le PATH.
+On Windows, use a Visual Studio developer terminal with C++ tools and Cargo on PATH.
 
 ```powershell
 cmake -S . -B build -A x64
 cmake --build build --config Release
 ```
 
-Pour reconstruire depuis le paquet Sources, extraire `colony-camera.tar.gz`,
-puis `dependencies.tar.gz` dans le dossier `Colony-Camera` obtenu. Les dossiers
-`deps/` contiennent alors les sources sans Git : sauter l'étape
-`fetch-dependencies.py` et utiliser directement CMake.
+To rebuild from a full source package, extract `colony-camera.tar.gz`, then
+extract `dependencies.tar.gz` inside the resulting `Colony-Camera` directory.
+These `deps/` folders contain source without Git metadata: skip
+`fetch-dependencies.py` and run CMake directly.
 
-Le moteur Rust est compilé automatiquement par CMake. CRT statique pour les
-deux langages. La voie Linux a été exécutée ; la voie Visual Studio reste à tester.
-Les exécutables `camera_abi` et `camera_load` testent l'interface entre langages,
-les gardes binaires et le chargement Windows sans démarrer Skyrim.
+CMake builds the Rust core automatically. Both languages use the static CRT.
+The Linux build path has been exercised; the Visual Studio path remains untested.
+The `camera_abi` and `camera_load` executables check the cross-language interface,
+binary guards and Windows DLL loading without starting Skyrim.
 
 ```sh
-# Linux/Wine : utiliser un préfixe de test distinct de celui du jeu.
+# Linux/Wine: use a test prefix separate from the game prefix.
 WINEPREFIX="$PWD/build/wine" wine build/camera_abi.exe
 WINEPREFIX="$PWD/build/wine" wine build/camera_load.exe "$(WINEPREFIX="$PWD/build/wine" winepath -w "$PWD/build/ColonyCamera.dll")"
-python3 scripts/verify-runtime.py /chemin/SkyrimSE.exe /chemin/versionlib-1-7-104-0.bin
+python3 scripts/verify-runtime.py /path/to/SkyrimSE.exe /path/to/versionlib-1-7-104-0.bin
 cmake --install build --prefix dist/staging
 ```
 
-## Provenance et licence
+## Provenance and license
 
-Code original de ce projet sous GPL-3.0-or-later. Aucun code, asset, script,
-menu ou preset de SmoothCam inclus. Bibliothèque moteur CommonLibSSE-NG
-(alandtse et contributeurs), journalisation spdlog, en-têtes DirectXMath et
-DirectXTK de Microsoft : versions et notices dans `dependencies.json` et
-`THIRD-PARTY-NOTICES.md`. Les sources de l'alpha accompagnent son paquet de test.
+Original project code is GPL-3.0-or-later. No SmoothCam source files, assets,
+scripts, menus or presets are included. Dependencies include CommonLibSSE-NG
+(alandtse and contributors), spdlog, DirectXMath and DirectXTK. Their revisions,
+licenses and credits are recorded in `dependencies.json` and
+`THIRD-PARTY-NOTICES.md`.
 
-La lecture de déclarations CommonLib et des points d'entrée de Skyrim permet
-l'intégration au moteur ; elle n'établit pas une validation en jeu ni une promesse
-de publication sur une plateforme. Voir `docs/verification.md` pour les limites.
+Public [SmoothCam source](https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f3960ec4de2b28af5e863c794a3924e6a2dfdd)
+was studied to understand deferred camera integration and publication to NiCamera.
+The CommonLib bridge is implemented in this project. Inspecting engine entry
+points does not establish in-game correctness or comprehensive compatibility.
+See [the verification record](docs/verification.md) for evidence and limitations.
 
-## Correctif 0.1.1
+When distributing the binary, provide this source link and the corresponding
+version, and retain the supplied license and third-party notices.
 
-L’alpha 0.1 bloquait son traitement dès qu’une autre extension interceptait les
-fonctions de caméra. Les hooks sont désormais posés après chargement d’une partie
-ou démarrage d’une nouvelle partie, en conservant les callbacks déjà présents.
-La position est publiée dans l’état de caméra, sa racine et le nœud de rendu ;
-la matrice de projection est ensuite recalculée par le moteur.
+## Camera fixes
 
-Le journal distingue l’installation, l’appel effectif du callback, l’application
-d’une image et le premier déplacement non nul. Ces traces ne sont pas écrites
-à chaque image. Les animations sans contrôle et les killmoves
-restent natifs pour limiter les interférences avec Improved Camera.
-Ce n’est pas une validation de toutes ses animations ou de tous les mods de caméra.
+### 0.1.1
 
-Le fonctionnement de raccordement a été étudié dans les sources publiques de
-[SmoothCam](https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f3960ec4de2b28af5e863c794a3924e6a2dfdd),
-notamment le chargement différé et la publication vers NiCamera. Aucun fichier
-SmoothCam n’est embarqué ; la passerelle CommonLib est implémentée dans ce projet.
+The initial alpha stopped processing when another plugin intercepted camera
+functions. Hooks now install after loading or starting a game, preserving existing
+callbacks. The result is published to the camera state, scene root and render
+node, then the engine recalculates the projection matrix.
 
-## Correctif 0.1.2
+Logs distinguish hook installation, callback execution, the first applied frame
+and the first nonzero displacement. These messages are not emitted every frame.
+Animations without player control and killmoves retain native behavior.
 
-L’essai de 0.1.1 a confirmé l’appel du callback après TDM/SkyParkour, mais le
-traitement restait bloqué par un diagnostic ambigu : NiCamera absente ou racine
-attachée à un parent. La présence d’un parent n’est plus un motif de refus : la
-position locale est obtenue par la transformation inverse CommonLib du parent,
-tandis que les positions monde et le décalage propre au nœud de rendu sont préservés.
-Une transformation invalide laisse les positions intactes.
+### 0.1.2
 
-Les diagnostics distinguent maintenant racine absente, type des enfants,
-transformation invalide et application réussie. La détection d’Improved Camera
-reconnaît aussi son vrai nom de fichier `ImprovedCamera.dll`.
-Le jeu doit être relancé pour charger cette DLL ; la levée du blocage observé
-reste à confirmer avec le nouveau journal.
+The 0.1.1 callback ran after TDM/SkyParkour but rejected a missing NiCamera or a
+parented root under the same diagnostic. A parent is now allowed: its inverse
+transform produces the root's local position while preserving world positions
+and the render child's own offset. Invalid transforms leave positions unchanged.
+Logs distinguish a missing root, child types, invalid transforms and successful
+application. Improved Camera detection recognizes `ImprovedCamera.dll`.
+The user subsequently confirmed a visible effect; details are in the verification
+record. Restarting Skyrim is required after replacing the DLL.
 
-## Mesure de performances — 0.1.3 diagnostic
+## Performance diagnostics in 0.1.3
 
-L’utilisateur rapporte 200 FPS désactivé contre 170 FPS lors de rotations en
-course, activé. Ce signal A/B ne suffit pas à attribuer le coût à une fonction.
-Cette version conserve le comportement de caméra et mesure une mise à jour sur
-seize. Bilan après 64 échantillons (environ cinq secondes à 200 FPS), également
-lors d’une bascule Ctrl+F8. Aucune ligne de performance par image.
+A user reported 200 FPS with the effect disabled versus 170 FPS while running
+and turning with it enabled. That report alone does not identify the source of
+the cost. This diagnostic version keeps camera behavior unchanged and measures
+one update in sixteen. It reports after 64 samples and when toggling Ctrl+F8;
+there is no per-frame performance logging.
 
-`PERF` distingue activé/désactivé. `mean_us` donne les moyennes en microsecondes,
-`own` exclut la fonction précédente (`previous_chain`, moteur et autres mods),
-`collision`, `rust` et `scene` détaillent des portions de notre temps. Les
-moyennes portent sur tous les échantillons du bloc, y compris ceux sans effet :
-`applied` indique combien ont réellement publié une position. `peak_own_us`
-est le maximum échantillonné, pas le pire frame garanti ni un percentile.
+`PERF` separates enabled and disabled samples. `mean_us` reports microseconds:
+`own` excludes `previous_chain` (engine and other plugins); `collision`, `rust`
+and `scene` describe portions of the plugin's time. Averages cover every sample
+in the block, including samples with no effect; `applied` counts published
+positions. `peak_own_us` is a sampled maximum, not a guaranteed worst frame or a
+percentile.
 
-Courir et tourner pendant vingt secondes, basculer Ctrl+F8, refaire le même
-trajet vingt secondes puis réactiver. Éviter menus, chargements et changements
-de réglages pendant la comparaison. Fournir le journal ColonyCamera.log.
+For comparison, run and turn for twenty seconds, toggle Ctrl+F8, repeat the same
+route for twenty seconds, then re-enable. Avoid menus, loading and configuration
+changes during the comparison, and include `ColonyCamera.log` with your report.
 
-Ces durées murales incluent les interruptions éventuelles par le système, ne mesurent ni le
-GPU ni le temps complet d’une image. Le traitement des commandes et les bilans
-écrits hors de la sonde sont exclus. L’instrumentation a elle-même un petit coût
-non calibré : elle sert à localiser le problème, pas à certifier une perte de FPS.
+These wall-clock timings include possible OS interruptions. They measure neither
+GPU cost nor complete frame time. Command handling and reports outside the probe
+are excluded. The instrumentation has an uncalibrated cost of its own: it helps
+locate overhead, but does not certify an FPS loss.
