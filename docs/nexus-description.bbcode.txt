@@ -14,7 +14,7 @@ Colony Camera is a separate project from SmoothCam. It does not require SmoothCa
 [*]Close Skyrim and back up your camera configuration.
 [*]Install the requirements listed below for your exact game version.
 [*]Disable SmoothCam and other full third-person camera replacements before enabling Colony Camera. Colony Camera remains inactive if SmoothCam.dll is loaded.
-[*]Install the archive with your mod manager. If prompted to select the data directory, choose "Colony Camera 0.1.2 alpha", the folder containing SKSE.
+[*]Install the archive with your mod manager. The archive root contains SKSE, alongside licenses, notices and sources; keep these accompanying files.
 [*]Check that the mod provides SKSE/Plugins/ColonyCamera.dll and SKSE/Plugins/ColonyCamera.ini. There is no ESP or ESL to enable.
 [*]Launch Skyrim through SKSE, load a save or start a new game, and switch to third person. The camera hooks are installed after a game is loaded or started.
 [*]Test movement, narrow passages, aiming and perspective changes before settling on your settings.
@@ -66,6 +66,8 @@ Thanks to alandtse and the CommonLibSSE-NG contributors for the library used by 
 
 Thanks to mwilsnd for SmoothCam. Its public source was studied as a reference for understanding camera integration. No SmoothCam source files, assets, menus or presets are included in Colony Camera.
 
-Thanks to the contributors to Rust, spdlog, DirectXMath and DirectXTK. The relevant notices and accompanying source archives are included with this release.
+Thanks to the contributors to Rust, spdlog, DirectXMath and DirectXTK. The relevant notices and exact project/dependency source archives are included with this release.
+
+Source code (GPL-3.0-or-later) and the matching 0.1.2 download: [url=https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2]GitHub source and release[/url].
 
 Colony Camera is a MotherSphere project. Thanks to everyone testing this alpha and providing logs and clear feedback.
