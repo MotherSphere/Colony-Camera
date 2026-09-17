@@ -234,7 +234,9 @@ public:
         for (bool left : {false, true})
             if (const auto* item = player->GetEquippedObject(left); item && item->Is(RE::FormType::Light))
                 equippedLight = true;
-        const auto armsPolicy = body_position::SelectArms(player->IsWeaponDrawn(), equippedLight);
+        // ActorState's base offset varies with the runtime. An inherited call on
+        // PlayerCharacter would use the compile-time layout in this multi-build.
+        const auto armsPolicy = body_position::SelectArms(player->AsActorState()->GetWeaponState(), equippedLight);
         usesNativeArms_ = !armsPolicy.hideNative;
         std::array<RE::NiTransform, 3> expectedBones{};
         for (std::size_t i = 0; i < bones_.size(); ++i) {
@@ -258,12 +260,12 @@ public:
         if (const auto& biped = player->GetBiped(false); biped) {
             for (auto slot : {RE::BIPED_OBJECTS::kHead, RE::BIPED_OBJECTS::kHair,
                     RE::BIPED_OBJECTS::kLongHair, RE::BIPED_OBJECTS::kCirclet,
-                    RE::BIPED_OBJECTS::kEars, RE::BIPED_OBJECTS::kShield,
+                    RE::BIPED_OBJECTS::kEars,
                     RE::BIPED_OBJECTS::kDecapitateHead})
                 Hide(biped->objects[slot].partClone.get());
-            for (std::uint32_t slot = RE::BIPED_OBJECTS::kHandToHandMelee;
-                    slot < RE::BIPED_OBJECTS::kTotal; ++slot)
-                Hide(biped->objects[slot].partClone.get());
+            // Equipment is not a head mask. Preserve holstered weapons, quivers
+            // and shields rather than culling every biped equipment clone.
+            // Held body equipment follows its selected arm's bone transform.
         }
         Hide(player->GetFaceNodeSkinned());
         bool hidden = body_->GetAppCulled();

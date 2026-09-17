@@ -1,10 +1,10 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.4 is a development candidate** with configurable
+CommonLibSSE-NG bridge. **0.2.5 is a development candidate** with configurable
 third-person transitions, native settings menus and an opt-in first-person body
-experiment. It fixes a body-offset direction reversal near vertical camera views
-and records first-person publication outcomes. It is not a complete
+experiment. It corrects runtime weapon-state access, preserves native equipment
+during draw transitions and removes blanket body-equipment culling. It is not a complete
 SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
@@ -30,8 +30,9 @@ remain the published historical release; its tag and binary are unchanged.
 
 The **first-person body experiment is off by default**. It attempts to display a
 conventional humanoid third-person body while retaining Skyrim's native camera.
-Sheathed ordinary movement uses body arms; drawn weapons or an equipped torch
-use native first-person arms. Head/third-person arm masking and equipment visibility
+Confirmed sheathed ordinary movement uses body arms; drawing, drawn and sheathing
+weapons, readied fists or an equipped torch use native first-person arms. Unknown
+weapon states also retain the native rig. Head/third-person arm masking and equipment visibility
 are temporary, with restoration when the plugin still owns the changed values.
 Missing or replaced skeleton nodes cause a native fallback.
 
@@ -56,9 +57,24 @@ fallback only when that projection degenerates. Continuity across vertical is
 verified mathematically for native views without roll; arbitrary rolling camera
 rigs have no equivalent guarantee. Native actor pitch is clamped, but the final
 view also adds the camera bone's orientation without another pitch clamp.
-**This defect has not been established as the user's remaining visual cause.**
+The tester subsequently reported first-person framing fixed in 0.2.4, but an
+invisible drawn weapon with hands visible low/right. Disabling only the body
+experiment restored the weapon. A second test kept the experiment enabled but
+disabled alignment: the weapon remained invisible. Translation is therefore not
+necessary for the reported symptom; these comparisons still do not establish a
+specific attachment layout.
 The animated torso can still move relative to its eye landmark. Native body tilt,
 height, projection and mesh clipping remain separate; no body rotation is forced.
+
+0.2.5 fixes a concrete runtime-access defect: inherited ActorState calls on the
+player used the compile-time base layout in this multi-runtime build. Weapon-state
+reads now use `AsActorState()`, as the coordinator already did. A false sheathed
+reading could hide the native rig while showing body hands, and 0.2.4 also hid all
+body weapon clones. The native aim fallback uses the same corrected accessor.
+The candidate preserves body weapon/shield/quiver clones and keeps the native rig
+available from the draw request through sheathing. These are bounded fixes, not
+confirmation that the tester's missing weapon is resolved. Head masks remain;
+selected body upper arms still shrink to avoid duplicate native combat arms.
 
 While the body experiment is enabled, `First-person motion window` log lines
 count applied, native-fallback, not-ready and rejected publications separately
@@ -67,11 +83,25 @@ They include the latest rejection/fallback codes, view pitch/heading, body forwa
 axis and alignment sample. This covers early exits that previously bypassed the
 status-change log. These are callback counts, not rendered-frame counts; a quiet
 or successful report still does not prove visual correctness.
+Equipment reports at the same cadence include the corrected weapon state,
+native-arm policy, native root visibility/scale, equipped form IDs and native
+biped attachment visibility/scale with exact body-clone alias checks. A matching
+clone pointer is distinct from shared skin-bone dependencies, which these logs do
+not establish.
 
 Improved Camera's default profile is the functional target, including its default
-absence of head bob. This candidate does not yet match its head visibility,
+absence of head bob. This candidate does not yet match its per-hand arm selection, head visibility,
 camera/hands FOV, near-plane, scale/height adjustment or special-action policies.
 Successful transform read-back proves publication, not a 1:1 visual match.
+Reference inspection found camera-ownership cooperation between Improved Camera
+and SmoothCam, not a generic invisible-weapon patch. Improved Camera's default
+arm selection depends on equipment/actions rather than a look-up/down threshold;
+its pitch-dependent near clipping is a separate feature.
+
+A supplied crash report from 0.2.4 strongly fits an overflowing native culling
+scratch-buffer copy in the exact Skyrim executable. The report does not identify
+the producer of the excessive frustum count or establish which mod caused it.
+0.2.5 does not patch that engine function and is not a claimed crash fix.
 
 Alignment, collision, projectile origins, interiors, head/hair/helmet clipping,
 weapons, shields, torches, spell effects and shadows still require testing.
@@ -215,7 +245,7 @@ cmake --build build-cross --parallel 2
 
 That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
 Its Windows test executables require Windows or a separate Wine test prefix.
-The 0.2.4 cross-build is not yet verified.
+The 0.2.5 cross-build is not yet verified.
 
 Validate entry bytes, Address Library mappings and camera RTTI against a
 legitimate local game installation:
@@ -224,20 +254,20 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
-The 0.2.4 Windows x64 DLL and targeted native test executable compiled. The new
-regression sweeps 410 camera orientations through both vertical poles, including
-the former forward-projection threshold; ordinary views, fallback and invalid
-inputs are covered too. Windows Application Control blocked both the canonical
+The 0.2.5 Windows x64 DLL and targeted native test executable compiled. New
+regressions cover the complete draw/sheath sequence, torch state, readied fists,
+unknown states and restoration of owned native-root visibility. Existing heading
+and transform checks remain. Windows Application Control blocked both the canonical
 body-position test and DLL-load test host before launch. Fresh Code Integrity
 event 3077 confirms the signing-policy rejection. These tests did **not** execute,
-and the 0.2.4 DLL was not dynamically loaded locally. No alternate executable or
+and the 0.2.5 DLL was not dynamically loaded locally. No alternate executable or
 security-policy change was used to circumvent the block.
 
 The full suite is **not green**. The previous runtime verification covered 14
 entries, two camera RTTI tables, both guarded callsites and 15 negative cases;
 this revision changes none of those hooks, runtime addresses or ABI layouts.
 Rust algorithms and settings are unchanged. Prior revision test passes do not
-validate this candidate. **Visual motion validation remains pending.** Compilation
+validate this candidate. **Weapon visibility and gameplay validation remain pending.** Compilation
 and static export checks cannot verify rendering or compatibility.
 
 Before using a candidate broadly, check new/load game, repeated POV switching,

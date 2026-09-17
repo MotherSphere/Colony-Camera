@@ -4,7 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <initializer_list>
-#include <RE/N/NiTransform.h>
+#include <RE/Skyrim.h>
 #include <cmath>
 #include <limits>
 
@@ -36,11 +36,14 @@ struct ArmSelection {
 };
 
 // Ordinary sheathed posture uses the body rig's complete shoulder/arm silhouette.
-// Combat and equipped lights retain the native first-person equipment rig.
-inline ArmSelection SelectArms(bool weaponDrawn, bool equippedLight) {
+// Keep the native equipment rig throughout drawing and sheathing, including
+// empty-handed combat. Unknown states also retain it; only a confirmed sheathed
+// state without a light permits hiding the native rig.
+inline ArmSelection SelectArms(RE::WEAPON_STATE weaponState, bool equippedLight) {
     constexpr float masked = 0.0001f;
-    return weaponDrawn || equippedLight ? ArmSelection{false, {masked, masked, masked}}
-                                      : ArmSelection{true, {masked, 1.0f, 1.0f}};
+    return weaponState != RE::WEAPON_STATE::kSheathed || equippedLight
+        ? ArmSelection{false, {masked, masked, masked}}
+        : ArmSelection{true, {masked, 1.0f, 1.0f}};
 }
 
 struct PublicationSample {

@@ -106,6 +106,7 @@ void TraceBody(unsigned phase, BodyOutcome outcome, unsigned detail = 0,
         && sample.available;
     const auto* player = RE::PlayerCharacter::GetSingleton();
     const auto* body = player ? player->Get3D(false) : nullptr;
+    const auto* arms = player ? player->Get3D(true) : nullptr;
     spdlog::info("First-person motion window: phase={} applied={} native_fallback={} view_not_ready={} rejected={} last_outcome={} last_fallback_reason={} last_rejected_status={} view_available={} pitch_deg={:.3f} heading=({:.3f},{:.3f}) body_forward=({:.3f},{:.3f},{:.3f}) alignment_available={} shift=({:.3f},{:.3f}) eye_available={}",
         phase == 0 ? "model" : "camera-view", trace.counts[0], trace.counts[1], trace.counts[2], trace.counts[3],
         static_cast<unsigned>(outcome), trace.lastFallback, trace.lastRejected, viewAvailable, pitch, heading[0], heading[1],
@@ -114,6 +115,30 @@ void TraceBody(unsigned phase, BodyOutcome outcome, unsigned detail = 0,
         sampleAvailable ? sample.result.translation[0] : 0.0f,
         sampleAvailable ? sample.result.translation[1] : 0.0f,
         sampleAvailable ? sample.frame.eye_available : 0u);
+    if (player) {
+        const auto* right = player->GetEquippedObject(false);
+        const auto* left = player->GetEquippedObject(true);
+        const auto& nativeBiped = player->GetBiped(true);
+        const auto& bodyBiped = player->GetBiped(false);
+        spdlog::info("First-person equipment: phase={} weapon_state={} policy_available={} last_native_requested={} native_root={} hidden={} scale={:.6f} right_form={:08X} left_form={:08X} native_biped={} body_biped={}",
+            phase == 0 ? "model" : "camera-view", static_cast<unsigned>(player->AsActorState()->GetWeaponState()),
+            outcome == BodyOutcome::applied, bodyRenderer.UsesNativeArms(), static_cast<const void*>(arms),
+            arms && arms->GetAppCulled(), arms ? arms->world.scale : 0.0f,
+            right ? right->GetFormID() : 0u, left ? left->GetFormID() : 0u,
+            static_cast<const void*>(nativeBiped.get()), static_cast<const void*>(bodyBiped.get()));
+        if (nativeBiped) {
+            for (unsigned slot = RE::BIPED_OBJECTS::kShield; slot < RE::BIPED_OBJECTS::kTotal; ++slot) {
+                if (slot > RE::BIPED_OBJECTS::kShield && slot < RE::BIPED_OBJECTS::kHandToHandMelee) continue;
+                const auto* node = nativeBiped->objects[slot].partClone.get();
+                if (!node) continue;
+                bool shared = false;
+                if (bodyBiped) for (const auto& item : bodyBiped->objects) shared |= item.partClone.get() == node;
+                spdlog::info("First-person equipment node: slot={} node={} parent={} hidden={} world_scale={:.6f} shared_body_clone={}",
+                    slot, static_cast<const void*>(node), static_cast<const void*>(node->parent),
+                    node->GetAppCulled(), node->world.scale, shared);
+            }
+        }
+    }
     trace.counts = {};
     trace.reported = now;
 }
@@ -220,7 +245,7 @@ void LoadConfig() {
 
 bool NativeAim(RE::PlayerCharacter* player, RE::PlayerCamera* camera) {
     if (camera->GetRuntimeData2().bowZoomedIn || player->WhoIsCasting() != 0) return true;
-    if (!player->IsWeaponDrawn()) return false;
+    if (!player->AsActorState()->IsWeaponDrawn()) return false;
     auto* item = player->GetEquippedObject(false);
     auto* weapon = item ? item->As<RE::TESObjectWEAP>() : nullptr;
     return weapon && (weapon->IsBow() || weapon->IsCrossbow());
@@ -292,7 +317,7 @@ void ProcessCommands() {
             ? std::format("\nLast scene publication: {}. Bone position error {:.3f}, scale error {:.6f}. Visual framing still needs checking.",
                 publication.matched ? "verified" : "rejected", publication.maxBonePositionError, publication.maxBoneScaleError)
             : std::string("\nNo scene publication sample yet.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.4 candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f}){}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.5 candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f}){}{}",
             decision.owner < std::size(owners) ? owners[decision.owner] : "Unknown",
             decision.reason < std::size(reasons) ? reasons[decision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, lastViewCorrection.x, lastViewCorrection.y, lastViewCorrection.z, alignmentText, publicationText));
@@ -735,7 +760,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,4,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,2,5,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -749,7 +774,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>((*directory / "ColonyCamera.log").string(), true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.4 candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.5 candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

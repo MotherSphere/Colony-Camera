@@ -66,16 +66,41 @@ int main() {
     viewRotation.entry[0][0] = 0.0005f;
     assert(!body_position::ViewHeading(viewRotation, heading) && heading == previousHeading);
 
-    // Sheathed idle preserves full body arms; fists/weapons readied and an
-    // equipped torch need the native equipment rig without duplicate body arms.
-    const auto idle = body_position::SelectArms(false, false);
+    // Only confirmed sheathed idle preserves full body arms. The native rig
+    // remains available from the draw request through the final sheath frame.
+    using WeaponState = RE::WEAPON_STATE;
+    const auto idle = body_position::SelectArms(WeaponState::kSheathed, false);
     assert(idle.hideNative && idle.boneFactors[0] < 0.001f &&
         idle.boneFactors[1] == 1 && idle.boneFactors[2] == 1);
-    for (const auto policy : {body_position::SelectArms(true, false),
-            body_position::SelectArms(false, true), body_position::SelectArms(true, true)}) {
-        assert(!policy.hideNative && policy.boneFactors[0] == idle.boneFactors[0] &&
-            policy.boneFactors[1] < 0.001f && policy.boneFactors[2] < 0.001f);
+    const std::array weaponCycle{WeaponState::kSheathed, WeaponState::kWantToDraw,
+        WeaponState::kDrawing, WeaponState::kDrawn, WeaponState::kWantToSheathe,
+        WeaponState::kSheathing, WeaponState::kSheathed};
+    for (bool equippedLight : {false, true}) {
+        bool nativeHidden = false;
+        camera::OwnedValue<bool> nativeVisibility;
+        for (std::size_t frame = 0; frame < weaponCycle.size(); ++frame) {
+            nativeVisibility.Restore(nativeHidden);
+            const auto policy = body_position::SelectArms(weaponCycle[frame], equippedLight);
+            const bool bodyArms = !equippedLight && (frame == 0 || frame == 6);
+            assert(policy.hideNative == bodyArms && policy.boneFactors[0] == idle.boneFactors[0]);
+            if (bodyArms) assert(policy.boneFactors[1] == 1 && policy.boneFactors[2] == 1);
+            else assert(policy.boneFactors[1] < 0.001f && policy.boneFactors[2] < 0.001f);
+            if (policy.hideNative) nativeVisibility.Write(nativeHidden, true);
+            assert(nativeHidden == bodyArms);
+        }
+        nativeVisibility.Restore(nativeHidden);
+        assert(!nativeHidden && !nativeVisibility.Active());
     }
+    // Readying fists uses the same actor state even with no equipped weapon.
+    const auto fists = body_position::SelectArms(WeaponState::kDrawn, false);
+    assert(!fists.hideNative && fists.boneFactors[1] < 0.001f && fists.boneFactors[2] < 0.001f);
+    // Never hide native equipment based on an unrecognized state value.
+    for (auto raw : {6u, 7u, (std::numeric_limits<std::uint32_t>::max)()})
+        for (bool equippedLight : {false, true}) {
+            const auto policy = body_position::SelectArms(static_cast<WeaponState>(raw), equippedLight);
+            assert(!policy.hideNative && policy.boneFactors[0] == idle.boneFactors[0] &&
+                policy.boneFactors[1] < 0.001f && policy.boneFactors[2] < 0.001f);
+        }
     RE::NiPoint3 local{4,5,6}, result{-1,-2,-3};
     const RE::NiPoint3 delta{8,-12,0};
     assert(body_position::Translate(local, delta, nullptr, result));
