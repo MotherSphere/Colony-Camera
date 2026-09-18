@@ -7,6 +7,10 @@ experiment. It removes animated eye/head offsets from horizontal body placement
 and adds explicit inventory/preview menu boundaries. Visual validation of this
 change is pending. It is not a complete SmoothCam or Improved Camera replacement.
 
+The [urgent first-person handoff](FIX%20TO%20DO%20URGENT.md) records the complete
+defect history, project architecture, attempted fixes, remaining work and visual
+acceptance criteria for this development branch.
+
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
 remain the published historical release; its tag and binary are unchanged.
