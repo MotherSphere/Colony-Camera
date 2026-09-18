@@ -27,7 +27,6 @@ bool reportedFrame = false;
 bool reportedMovement = false;
 bool reportedBodyAlignment = false;
 bool reportedViewMotion = false;
-RE::NiPoint3 lastViewCorrection{};
 RE::BSTSmartPointer<RE::ThirdPersonState> appliedTo;
 RE::TESObjectCELL* lastCell = nullptr;
 Clock::time_point lastTick{};
@@ -63,13 +62,18 @@ CameraCoordinator coordinator{};
 CameraDecision decision{};
 first_person::Renderer bodyRenderer;
 settings::Menu settingsMenu;
-struct FacingSnapshot {
-    body_facing::Sample sample{};
+struct BodyViewSnapshot {
+    body_facing::Sample facing{};
+    first_person::AlignmentSample alignment{};
+    body_position::PublicationSample publication{};
+    CameraDecision decision{};
+    RE::NiPoint3 viewCorrection{};
     Clock::time_point captured{};
     first_person::Status status = first_person::Status::inactive;
-    bool eye = false;
+    bool available = false;
+    bool viewCorrectionAvailable = false;
 };
-FacingSnapshot lastBodyFacing;
+BodyViewSnapshot lastBodyView;
 std::string activeLogPath;
 RE::NiPointer<RE::NiCamera> fovCamera;
 camera::OwnedValue<float> ownedWorldFov;
@@ -191,7 +195,7 @@ void ApplyConfig(const CameraConfig& replacement) {
     bodyRenderer.Reset();
     ResetFirstView();
     bodyTraces = {};
-    lastBodyFacing = {};
+    lastBodyView = {};
     reportedBodyAlignment = false;
     reportedViewMotion = false;
     if (appliedTo) RestoreNative(appliedTo.get());
@@ -260,6 +264,15 @@ bool NativeAim(RE::PlayerCharacter* player, RE::PlayerCamera* camera) {
     return weapon && (weapon->IsBow() || weapon->IsCrossbow());
 }
 
+constexpr std::array previewMenus{
+    RE::InventoryMenu::MENU_NAME, RE::MagicMenu::MENU_NAME,
+    RE::TweenMenu::MENU_NAME, RE::MapMenu::MENU_NAME};
+
+bool PreviewMenuOpen(RE::UI* ui) {
+    if (ui) for (const auto name : previewMenus) if (ui->IsMenuOpen(name)) return true;
+    return false;
+}
+
 CameraDecision Coordinate(RE::TESCameraState* current, bool inputEnabled) {
     auto* camera = RE::PlayerCamera::GetSingleton();
     auto* player = RE::PlayerCharacter::GetSingleton();
@@ -273,7 +286,7 @@ CameraDecision Coordinate(RE::TESCameraState* current, bool inputEnabled) {
         && camera->currentState.get() == current && camera->cameraTarget.get().get() == player) context.flags |= CC_AVAILABLE;
     if (controls && controls->IsMovementControlsEnabled() && inputEnabled) context.flags |= CC_CONTROLS;
     if (!ui || ui->GameIsPaused() || ui->IsMenuOpen("Dialogue Menu") || ui->IsMenuOpen("Loading Menu")
-        || ui->IsMenuOpen("Console") || settingsMenu.IsOpen()) context.flags |= CC_MENU;
+        || ui->IsMenuOpen("Console") || PreviewMenuOpen(ui) || settingsMenu.IsOpen()) context.flags |= CC_MENU;
     if (player && context.enabled && (context.camera_mode == CC_THIRD_PERSON || context.first_person_enabled)) {
         const auto* actor = player->AsActorState();
         if (actor->GetLifeState() != RE::ACTOR_LIFE_STATE::kAlive) context.flags |= CC_DEAD;
@@ -307,15 +320,17 @@ void ProcessCommands() {
     if (pending & 1) { for (unsigned mode = 0; mode < std::size(timings); ++mode) ReportTiming(mode); auto replacement = config; replacement.enabled ^= 1; ApplyConfig(replacement); spdlog::info("Enabled={}", config.enabled); }
     if (pending & 2) { leftShoulder = !leftShoulder; spdlog::info("Left shoulder={}", leftShoulder); }
     if ((pending & 8) && menuAvailable) {
-        // Freeze the last camera-view sample before opening the modal menu resets
-        // the renderer. Never measure the restored/menu pose as gameplay evidence.
-        const auto& facing = lastBodyFacing.sample;
+        // Both diagnostics pages use one camera-view record, copied before the
+        // modal menu resets the renderer. A later model pass is not this sample.
+        const auto snapshot = lastBodyView;
+        const auto sampleAge = snapshot.available
+            ? std::chrono::duration<double>(Clock::now() - snapshot.captured).count() : 0.0;
+        const auto& facing = snapshot.facing;
         const auto facingText = facing.available
             ? std::format("Body facing - last camera-view sample\nView yaw: {:.1f} deg\nBody yaw: {:.1f} deg\nBody minus view: {:.1f} deg\n{} in body coordinates: ({:.2f}, {:.2f}, {:.2f})\nSample age at menu opening: {:.2f} s\nScene status: {}\nClose this menu, turn, then reopen to compare.",
                 facing.viewYawDegrees, facing.bodyYawDegrees, facing.yawGapDegrees,
-                lastBodyFacing.eye ? "Eye" : "Head", facing.anchorLocal.x, facing.anchorLocal.y, facing.anchorLocal.z,
-                std::chrono::duration<double>(Clock::now() - lastBodyFacing.captured).count(),
-                lastBodyFacing.status == first_person::Status::applied ? "Applied" : "Rejected")
+                snapshot.alignment.frame.eye_available ? "Eye" : "Head", facing.anchorLocal.x, facing.anchorLocal.y, facing.anchorLocal.z,
+                sampleAge, snapshot.status == first_person::Status::applied ? "Applied" : "Rejected")
             : std::string("Body facing\nNo usable camera-view sample. Enable Body Experiment, enter ordinary first person and close the menu briefly before reopening it.");
         const auto logText = activeLogPath.empty()
             ? std::string("No log path was recorded.")
@@ -328,21 +343,30 @@ void ProcessCommands() {
         constexpr const char* reasons[] = {"Active", "Disabled", "Camera unavailable", "Menu open", "Controls unavailable",
             "Death/bleedout", "Ragdoll", "Killmove", "Special action or unsupported race", "Native camera state",
             "Body experiment off", "Body hooks unavailable", "Invalid camera context", "Third-person camera off"};
-        const auto& alignment = bodyRenderer.GetAlignmentSample();
+        const auto& alignment = snapshot.alignment;
         const auto alignmentText = alignment.available
             ? std::format("\nLast body sample: scale {:.2f}, horizontal shift ({:.1f}, {:.1f}), eye/head height difference {:.1f}. {}",
                 alignment.frame.scale, alignment.result.translation[0], alignment.result.translation[1],
                 alignment.result.vertical_error, alignment.result.valid ? "Alignment math accepted." : "Alignment rejected; native fallback.")
             : std::string("\nNo body alignment sample yet. Enable the body experiment and enter first person.");
-        const auto& publication = bodyRenderer.GetPublicationSample();
+        const auto& publication = snapshot.publication;
         const auto publicationText = publication.available
             ? std::format("\nLast scene publication: {}. Bone position error {:.3f}, scale error {:.6f}. Visual framing still needs checking.",
                 publication.matched ? "verified" : "rejected", publication.maxBonePositionError, publication.maxBoneScaleError)
             : std::string("\nNo scene publication sample yet.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.6 diagnostic candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f}){}{}",
-            decision.owner < std::size(owners) ? owners[decision.owner] : "Unknown",
-            decision.reason < std::size(reasons) ? reasons[decision.reason] : "Unknown", config.third_person_enabled != 0,
-            firstHooksInstalled, firstConflict, lastViewCorrection.x, lastViewCorrection.y, lastViewCorrection.z, alignmentText, publicationText), facingText, logText);
+        const auto& sampleDecision = snapshot.available ? snapshot.decision : decision;
+        const auto sampleText = snapshot.available
+            ? std::format("\nCamera-view sample age at menu opening: {:.2f} s. Scene status: {}.",
+                sampleAge, snapshot.status == first_person::Status::applied ? "Applied" : "Rejected")
+            : std::string("\nNo camera-view body sample; owner/state describe the last coordinator decision.");
+        const auto correctionText = snapshot.viewCorrectionAvailable
+            ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
+                snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
+            : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.7 body-placement candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+            sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
+            sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
+            firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
     }
 }
 
@@ -504,7 +528,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
 }
 
 void FirstBegin(RE::FirstPersonState* self) {
-    lastBodyFacing = {};
+    lastBodyView = {};
     if (appliedTo) RestoreNative(appliedTo.get());
     RestorePosition();
     bodyRenderer.Reset(); RestoreFov(); state = {}; coordinator = {}; lastTick = {};
@@ -515,7 +539,7 @@ void FirstBegin(RE::FirstPersonState* self) {
     originalFirstBegin(self);
 }
 void FirstEnd(RE::FirstPersonState* self) {
-    lastBodyFacing = {};
+    lastBodyView = {};
     bodyRenderer.Reset(); coordinator = {};
     ResetFirstView();
     originalFirstEnd(self);
@@ -536,7 +560,7 @@ void FirstUpdate(RE::FirstPersonState* self, RE::BSTSmartPointer<RE::TESCameraSt
 }
 
 void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
-    if (phaseIndex == 1) lastBodyFacing = {};
+    if (phaseIndex == 1) lastBodyView = {};
     const char* phase = phaseIndex == 0 ? "model" : "camera-view";
     auto* player = RE::PlayerCharacter::GetSingleton();
     auto* camera = RE::PlayerCamera::GetSingleton();
@@ -562,13 +586,16 @@ void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
     // GetTranslation is a raw model anchor. Skyrim adds dampening and collision
     // before publishing the view. Align to what is actually displayed instead.
     const auto viewEye = rendered->world.translate;
+    RE::NiPoint3 viewCorrection{};
+    bool viewCorrectionAvailable = false;
     if (self->firstPersonCameraObj) {
         RE::NiPoint3 rawEye{};
         self->GetTranslation(rawEye);
-        lastViewCorrection = viewEye - rawEye;
-        const auto& delta = lastViewCorrection;
-        if (!reportedViewMotion && std::isfinite(delta.x) && std::isfinite(delta.y)
-            && std::isfinite(delta.z) && delta.x*delta.x + delta.y*delta.y + delta.z*delta.z > 0.25f) {
+        viewCorrection = viewEye - rawEye;
+        const auto& delta = viewCorrection;
+        viewCorrectionAvailable = std::isfinite(delta.x) && std::isfinite(delta.y) && std::isfinite(delta.z);
+        if (!reportedViewMotion && viewCorrectionAvailable
+            && delta.x*delta.x + delta.y*delta.y + delta.z*delta.z > 0.25f) {
             spdlog::info("First-person final view differs from raw model anchor: phase={} delta=({:.3f},{:.3f},{:.3f}); body follows rendered view, third-person effect={}",
                 phase, delta.x, delta.y, delta.z, config.third_person_enabled);
             reportedViewMotion = true;
@@ -578,8 +605,9 @@ void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
     const auto status = bodyRenderer.Apply(player, viewEye,
         config.body_alignment, rendered, probe.sampled);
     if (phaseIndex == 1) {
-        lastBodyFacing = {bodyRenderer.GetFacingSample(), Clock::now(), status,
-            bodyRenderer.GetAlignmentSample().frame.eye_available != 0};
+        lastBodyView = {bodyRenderer.GetFacingSample(), bodyRenderer.GetAlignmentSample(),
+            bodyRenderer.GetPublicationSample(), current, viewCorrection, Clock::now(),
+            status, true, viewCorrectionAvailable};
     }
     TraceBody(phaseIndex, status == first_person::Status::applied ? BodyOutcome::applied : BodyOutcome::rejected,
         static_cast<unsigned>(status), rendered);
@@ -595,9 +623,10 @@ void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
     }
     const auto& alignment = bodyRenderer.GetAlignmentSample();
     if ((!reportedBodyAlignment || statusChanged) && alignment.available) {
-        spdlog::info("Body alignment sample: phase={} math_valid={} enabled={} scale={:.3f} rendered_eye=({:.2f},{:.2f},{:.2f}) head=({:.2f},{:.2f},{:.2f}) eye_available={} body_eye=({:.2f},{:.2f},{:.2f}) shift=({:.2f},{:.2f},{:.2f}) height_difference={:.2f} backset={:.1f} sideways={:.1f} world_fov={:.1f}; framing and equipment require visual verification",
+        spdlog::info("Body alignment sample: phase={} math_valid={} enabled={} scale={:.3f} rendered_eye=({:.2f},{:.2f},{:.2f}) anchor=body_root root=({:.2f},{:.2f},{:.2f}) head=({:.2f},{:.2f},{:.2f}) eye_available={} body_eye=({:.2f},{:.2f},{:.2f}) shift=({:.2f},{:.2f},{:.2f}) height_difference={:.2f} backset={:.1f} sideways={:.1f} world_fov={:.1f}; framing and equipment require visual verification",
             phase, alignment.result.valid, config.body_alignment.alignment_enabled, alignment.frame.scale,
             alignment.frame.camera[0], alignment.frame.camera[1], alignment.frame.camera[2],
+            alignment.frame.body_root[0], alignment.frame.body_root[1], alignment.frame.body_root[2],
             alignment.frame.head[0], alignment.frame.head[1], alignment.frame.head[2],
             alignment.frame.eye_available, alignment.frame.eye[0], alignment.frame.eye[1], alignment.frame.eye[2],
             alignment.result.translation[0], alignment.result.translation[1], alignment.result.translation[2],
@@ -651,7 +680,7 @@ void CameraViewUpdate(RE::TESCamera* self) {
     // call. Never align a new first-person body to the previous third-person eye.
     if (!camera || self != camera || !first || camera->currentState != beforeState
         || firstUpdatedInView != beforeState.get()) {
-        lastBodyFacing = {};
+        lastBodyView = {};
         bodyRenderer.Reset();
         if (first) TraceBody(1, BodyOutcome::view_not_ready);
         return;
@@ -687,6 +716,31 @@ public:
     }
 };
 Input input;
+
+class PreviewMenuEvents final : public RE::BSTEventSink<RE::MenuOpenCloseEvent> {
+public:
+    RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* event,
+        RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override {
+        if (!event || !event->opening) return RE::BSEventNotifyControl::kContinue;
+        const auto* name = event->menuName.c_str();
+        bool preview = false;
+        if (name) for (const auto candidate : previewMenus) preview |= candidate == name;
+        if (!preview) return RE::BSEventNotifyControl::kContinue;
+        // Use the SKSE main-thread queue; event delivery alone does not prove
+        // ownership of scene data. Coordinate also checks fresh UI state before
+        // every publication, including menus that do not pause gameplay.
+        if (auto* tasks = SKSE::GetTaskInterface()) tasks->AddTask([] {
+            // A delayed open notification must not clear a new gameplay pose
+            // after the menu has already closed. There is no persistent gate.
+            if (!PreviewMenuOpen(RE::UI::GetSingleton())) return;
+            bodyRenderer.Reset();
+            ResetFirstView();
+            lastBodyView = {};
+        });
+        return RE::BSEventNotifyControl::kContinue;
+    }
+};
+PreviewMenuEvents previewMenuEvents;
 
 bool Executable(std::uintptr_t address) {
     MEMORY_BASIC_INFORMATION memory{};
@@ -776,6 +830,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
         for (auto& s : shoulderSettings) if (s && s->GetType() != RE::Setting::Type::kFloat) s = nullptr;
         if (!shoulderSettings[0] || !shoulderSettings[1]) spdlog::warn("Shoulder mirroring unavailable: native settings missing");
         if (auto* manager = RE::BSInputDeviceManager::GetSingleton()) manager->AddEventSink(&input);
+        if (auto* ui = RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(&previewMenuEvents);
         spdlog::info("Data ready; Ctrl+F8 toggle, Ctrl+F9 shoulder, Ctrl+F10 reload (default bindings)");
     }
     if (message->type == SKSE::MessagingInterface::kPreLoadGame || message->type == SKSE::MessagingInterface::kPostLoadGame
@@ -783,7 +838,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
         if (appliedTo) RestoreNative(appliedTo.get());
         RestorePosition(); bodyRenderer.Reset(); ResetFirstView(); RestoreFov(); coordinator = {}; settingsMenu.Cancel();
         bodyTraces = {};
-        lastBodyFacing = {};
+        lastBodyView = {};
         input.Reset(); commands = 0; resetRequested = true;
     }
 }
@@ -791,7 +846,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,6,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,2,7,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -806,7 +861,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.6 diagnostic candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.7 body-placement candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

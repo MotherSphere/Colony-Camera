@@ -38,19 +38,20 @@ enum CameraProfileIndex : std::uint32_t {
 struct BodyAlignmentFrame {
     float camera[3];
     float head[3]; // unsuppressed head world position, with previous body lease restored
-    float heading[2]; // horizontal skeleton-forward XY; normalized in Rust, no pitch
+    float heading[2]; // horizontal published-view forward XY; normalized in Rust, no pitch
     float scale; // cumulative unsuppressed skeleton world scale
-    float eye[3]; // actual unsuppressed 3P eye landmark when available
-    std::uint32_t eye_available; // 0=head fallback, 1=eye; other values rejected
+    float eye[3]; // actual unsuppressed 3P eye landmark, diagnostics only
+    std::uint32_t eye_available; // height diagnostic: 0=head, 1=eye; other values rejected
+    float body_root[3]; // required unmodified locomotion-root world position; previous lease restored
 };
 struct BodyAlignmentOptions {
     std::uint32_t alignment_enabled;
-    float body_backset; // 0..40, positive moves body backward at scale one
+    float body_backset; // 0..40, places body root behind camera at scale one
     float body_side; // -20..20, positive moves body right at scale one
 };
 struct BodyAlignmentResult {
     float translation[3]; // world displacement; Z is always zero
-    float vertical_error; // camera Z minus selected eye/head anchor Z; diagnostics only
+    float vertical_error; // camera Z minus selected eye/head landmark Z; diagnostics only
     std::uint32_t valid; // zero means native fallback, never apply a partial result
 };
 struct CameraConfig {
@@ -98,8 +99,9 @@ struct CameraDecision {
 static_assert(std::is_standard_layout_v<CameraState> && std::is_trivially_copyable_v<CameraConfig>);
 static_assert(sizeof(CameraState) == 64 && sizeof(CameraFrame) == 40);
 static_assert(sizeof(CameraProfile) == 40 && sizeof(CameraConfig) == 324);
-static_assert(sizeof(BodyAlignmentFrame) == 52 && sizeof(BodyAlignmentOptions) == 12 && sizeof(BodyAlignmentResult) == 20);
+static_assert(sizeof(BodyAlignmentFrame) == 64 && sizeof(BodyAlignmentOptions) == 12 && sizeof(BodyAlignmentResult) == 20);
 static_assert(offsetof(BodyAlignmentFrame, eye) == 36 && offsetof(BodyAlignmentFrame, eye_available) == 48);
+static_assert(offsetof(BodyAlignmentFrame, body_root) == 52);
 static_assert(sizeof(CameraCoordinator) == 8 && sizeof(CameraContext) == 28 && sizeof(CameraDecision) == 24);
 static_assert(alignof(CameraState) == 4 && alignof(CameraConfig) == 4);
 static_assert(offsetof(CameraState, base) == 28 && offsetof(CameraProfile, offset_half_life) == 20);

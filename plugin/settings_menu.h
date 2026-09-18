@@ -135,7 +135,7 @@ class Menu {
         });
     }
     void FirstPerson() {
-        Page(std::format("First Person\nBody experiment: {}  Alignment: {}\nBody backset: {:.1f}  Sideways: {:.1f}\nNative camera; body arms while sheathed, native hands for weapons or a torch. Alignment preserves body size and foot height. Equipment and shadows still need testing.",
+        Page(std::format("First Person\nBody experiment: {}  Alignment: {}\nBody backset: {:.1f}  Sideways: {:.1f}\nStable body placement behind the native camera; head motion does not shift the whole body. Body arms while sheathed, native hands for weapons or a torch. Body size and height are unchanged.",
             draft.first_person_enabled ? "Requested" : "Off", draft.body_alignment.alignment_enabled ? "On" : "Off",
             draft.body_alignment.body_backset, draft.body_alignment.body_side),
             {"Toggle body experiment", "Toggle alignment", "Body backset", "Body sideways", "Reset alignment", "Back"}, [this](auto b) {
@@ -150,7 +150,7 @@ class Menu {
         const auto value = field == 0 ? draft.body_alignment.body_backset : draft.body_alignment.body_side;
         Page(std::format("{}: {:.1f}\n{}\nDistances scale with the body. Alignment must be on. Changes apply after closing the menu; Save settings keeps them for the next session.",
             field == 0 ? "Body backset" : "Body sideways", value,
-            field == 0 ? "0..40: higher values move the body farther behind your eye, reducing torso obstruction when looking down."
+            field == 0 ? "0..40: places the body root behind your view. Higher values move the body farther back. Reset alignment uses 12."
                        : "-20..20: positive moves the body to your right; negative moves it left."),
             {"Decrease", "Increase", "Decrease x5", "Increase x5", "Default", "Back"}, [this, field](auto b) {
                 if (b > 4) { FirstPerson(); return; }

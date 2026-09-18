@@ -1,12 +1,11 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.6 is a diagnostic development candidate** with configurable
+CommonLibSSE-NG bridge. **0.2.7 is a body-placement development candidate** with configurable
 third-person transitions, native settings menus and an opt-in first-person body
-experiment. It adds in-game body/view measurements and the active log location
-to investigate a reported body-facing problem; it does not change body yaw or
-claim to fix that problem. It is not a complete
-SmoothCam or Improved Camera replacement.
+experiment. It removes animated eye/head offsets from horizontal body placement
+and adds explicit inventory/preview menu boundaries. Visual validation of this
+change is pending. It is not a complete SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
@@ -45,10 +44,11 @@ output before resampling; new first-person transitions wait for a native view
 update. Inactive state-update callbacks cannot restore the other perspective's
 outputs. No third-person interpolation runs in first person.
 
-Alignment prefers the body's eye landmark with a head fallback and adjustable
-backset/lateral offset. A full transform pass with controller advancement disabled
+Alignment now anchors the locomotion root behind the displayed camera, with
+adjustable backset/lateral offset. Animated eye/head landmarks provide height and
+pose diagnostics only. A full transform pass with controller advancement disabled
 checks resulting world transforms, then returns temporary local values to native
-values. Body scale and height and native camera/FOV remain unchanged.
+values. Body scale, world height, root rotation and native camera/FOV remain unchanged.
 User testing of 0.2.3 reports intermittent torso intrusion during camera turns;
 small movement-only steps appear unaffected. Startup was subsequently confirmed
 working. 0.2.4 fixes a demonstrated heading discontinuity: projected camera-forward
@@ -64,8 +64,8 @@ experiment restored the weapon. A second test kept the experiment enabled but
 disabled alignment: the weapon remained invisible. Translation is therefore not
 necessary for the reported symptom; these comparisons still do not establish a
 specific attachment layout.
-The animated torso can still move relative to its eye landmark. Native body tilt,
-height, projection and mesh clipping remain separate; no body rotation is forced.
+Animated torso deformation, native body tilt, height, projection and mesh clipping
+remain separate; no body rotation is forced.
 
 0.2.5 fixes a concrete runtime-access defect: inherited ActorState calls on the
 player used the compile-time base layout in this multi-runtime build. Weapon-state
@@ -77,12 +77,21 @@ available from the draw request through sheathing. The tester confirmed that
 weapons are visible in 0.2.5. Head masks remain;
 selected body upper arms still shrink to avoid duplicate native combat arms.
 
-With alignment enabled in 0.2.5, the tester still reports the body turning or
-moving sideways when looking down and turning the view. It does not recenter on
-its own; turning back in the opposite direction is required. The yaw cause is
-unconfirmed. 0.2.6 exposes a snapshot of view/body headings and the eye landmark
-in body-local space, captured before opening settings resets the active pose.
-This diagnostic addition preserves the existing alignment behavior.
+The tester reported sideways body motion while sheathed, renewed by changing or
+unequipping an item in inventory. A confirmed defective 0.2.6 pose had equal view
+and body-root headings (-5.7 degrees), but an eye landmark at body-local
+(17.21, 28.07, 95.47). The previous algorithm could move the entire rig when this
+animated landmark moved, even with matching headings. In 0.2.7, horizontal
+placement depends on the restored native root instead. Changing finite eye/head
+positions cannot change the resulting root placement. This fixes that mathematical
+coupling; it does not establish which animation produced the reported pose or
+prove that every outfit now renders correctly.
+
+The numerical backset/side settings are retained, but their reference changes from
+the animated eye to the locomotion root. Start with First Person > Reset alignment
+(backset 12, side 0). No cached pose is calibrated when changing equipment or
+closing a menu. Inventory, Magic, Tween and Map menus explicitly suspend the body
+experiment, including non-pausing variants that retain gameplay controls.
 
 While the body experiment is enabled, `First-person motion window` log lines
 count applied, native-fallback, not-ready and rejected publications separately
@@ -167,7 +176,8 @@ scan codes; all shortcuts require Ctrl. The original F8/F9/F10 identities remain
 
 **Diagnostics > Body facing** shows the last available gameplay pose captured
 before the settings menu opens, including view/body headings and the body's local
-eye anchor. It is a snapshot, not a live view while the menu is open. Open it after
+eye landmark. Status and Body facing use one camera-view record, rather than mixing
+model and camera publications. It is a snapshot, not a live view while the menu is open. Open it after
 reproducing an offset and compare with a centered pose; **Diagnostics > Log location**
 provides the active log path separately. These pages allow reporting measurements
 without first locating the log file, including under Proton.
@@ -192,10 +202,11 @@ non-finite numbers and out-of-range values reject the entire file.
 
 First Person provides the body toggle, an alignment toggle and numeric backset/
 lateral controls. In `[first_person]`, `alignment_enabled=true` requests horizontal
-alignment, `body_backset=12` moves the body backward (0-40), and `body_side=0`
+placement of the body root, `body_backset=12` sets its distance behind the camera
+(0-40), and `body_side=0`
 moves it laterally (-20 to 20; positive is the view's horizontal right). Units are relative
 to skeleton scale 1. Unsafe positions or excessive translations retain native
-placement. Disable alignment to compare the previous framing while keeping the
+placement. Disable alignment to compare native root placement while keeping the
 body experiment enabled. Save persists these settings; the native camera and
 native combat-arm transforms remain unchanged.
 
@@ -264,7 +275,7 @@ cmake --build build-cross --parallel 2
 
 That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
 Its Windows test executables require Windows or a separate Wine test prefix.
-The 0.2.6 cross-build is not yet verified.
+The 0.2.7 cross-build is not yet verified.
 
 Validate entry bytes, Address Library mappings and camera RTTI against a
 legitimate local game installation:
@@ -273,19 +284,22 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
-The 0.2.6 Windows x64 DLL and facing-math test executable compiled. Regressions
-cover signed yaw wrapping, cardinal directions, anchor invariance under rigid
-motion/scale and invalid transforms. Windows Application Control blocked the
-canonical facing-math and DLL-load test hosts before launch. Fresh Code Integrity
-event 3077 confirmed the rejection; those tests did not execute. No alternate
-executable or security-policy change was used to circumvent the block.
+The 0.2.7 regressions cover stable root/torso placement while eye/head offsets
+change, the reported off-center landmark, scaled and translated bodies, movement
+and turning, root separation limits, and the updated 64-byte alignment-frame ABI.
+Existing tests also cover heading continuity across vertical views and arm-state
+selection. Windows Application Control previously blocked canonical native test
+hosts before launch (Code Integrity event 3077); no alternate executable or
+security-policy change is used to circumvent that restriction.
 
-The full suite is **not green**. Previous runtime verification covered 14 entries,
-two camera RTTI tables, both guarded callsites and 15 negative cases. Prior revision
-passes do not validate this candidate. The tester confirmed weapon visibility in
-0.2.5; **0.2.6 diagnostics and gameplay validation remain pending**, and the reported
-body-facing issue remains unresolved. Compilation and static export checks cannot
-verify rendering or compatibility.
+The full executable suite is **not green**. Runtime verification covers 14 entries,
+two camera RTTI tables and both guarded callsites. Prior revision passes do not
+validate this candidate. The tester confirmed weapon visibility in 0.2.5 and supplied
+0.2.6 diagnostics during the defect; **0.2.7 gameplay validation remains pending**.
+Compilation and static export checks cannot verify rendering or compatibility.
+The existing whole-scene publication/restore mechanism is retained: replacing
+only node world transforms would omit native flattened-bone/skinning caches.
+Interactions with partial updates by other scene producers remain unverified.
 
 Before using a candidate broadly, check new/load game, repeated POV switching,
 walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transitions,

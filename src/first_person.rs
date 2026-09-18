@@ -10,17 +10,20 @@ pub struct BodyAlignmentFrame {
     pub heading: [f32; 2],
     /// Unsuppressed cumulative skeleton world scale, not a local bone scale.
     pub scale: f32,
-    /// Actual unsuppressed third-person eye landmark, if available.
+    /// Actual unsuppressed third-person eye landmark, for diagnostics only.
     pub eye: [f32; 3],
-    /// Zero selects the head fallback and ignores `eye`; one selects `eye`.
+    /// Zero selects head-height diagnostics and ignores `eye`; one selects `eye`.
     pub eye_available: u32,
+    /// Required unmodified third-person locomotion-root world position. Sample
+    /// after restoring the previous body lease, before applying this correction.
+    pub body_root: [f32; 3],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BodyAlignmentOptions {
     pub alignment_enabled: u32,
-    /// Positive moves the body behind the eye, in skeleton units at scale one.
+    /// Positive places the body root behind the camera, in skeleton units at scale one.
     pub body_backset: f32,
     /// Positive moves the body to view-right, in skeleton units at scale one.
     pub body_side: f32,
@@ -51,7 +54,7 @@ pub struct BodyAlignmentResult {
     /// World-space displacement for a leased third-person root translation.
     /// The native root must be restored before each input frame is sampled.
     pub translation: [f32; 3],
-    /// Camera Z minus selected eye/head anchor Z; diagnostics only, never applied.
+    /// Camera Z minus selected eye/head landmark Z; diagnostics only, never applied.
     pub vertical_error: f32,
     pub valid: u32,
 }
@@ -63,6 +66,7 @@ pub fn align_body(frame: BodyAlignmentFrame, options: BodyAlignmentOptions) -> B
             .camera
             .iter()
             .chain(&frame.head)
+            .chain(&frame.body_root)
             .all(|v| v.is_finite() && v.abs() <= 1e8)
         || !frame.heading.iter().all(|v| v.is_finite())
         || !frame.scale.is_finite()
@@ -78,19 +82,24 @@ pub fn align_body(frame: BodyAlignmentFrame, options: BodyAlignmentOptions) -> B
     }
     let forward = frame.heading.map(|v| v / heading_length);
     let right = [forward[1], -forward[0]];
-    let anchor = if frame.eye_available == 1 {
+    let landmark = if frame.eye_available == 1 {
         frame.eye
     } else {
         frame.head
     };
-    let separation = [frame.camera[0] - anchor[0], frame.camera[1] - anchor[1]];
+    // Animated eye/head offsets must not move the whole body sideways or fore/aft.
+    // Position the locomotion root relative to the published native camera instead.
+    let separation = [
+        frame.camera[0] - frame.body_root[0],
+        frame.camera[1] - frame.body_root[1],
+    ];
     // An implausible native gap usually indicates stale/mismatched nodes. Do not
     // disguise it by saturating a correction or drag the actor's body across a cell.
     if separation[0].hypot(separation[1]) > 80.0 * frame.scale {
         return invalid;
     }
     let mut result = BodyAlignmentResult {
-        vertical_error: frame.camera[2] - anchor[2],
+        vertical_error: frame.camera[2] - landmark[2],
         valid: 1,
         ..invalid
     };

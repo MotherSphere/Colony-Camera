@@ -205,10 +205,12 @@ public:
             body_position::WorldMatchesLocal(eyeNode_->local, eyeNode_->world,
                 eyeNode_->parent ? &eyeNode_->parent->world : nullptr, body_->world.scale);
 
-        // The displayed camera includes native dampening and collision. Its
-        // caller reconciles both model and final-view updates against that eye.
-        // Capture unmasked landmarks before shrinking any bones.
+        // Position the locomotion root relative to the final displayed camera.
+        // Animated eye/head motion is diagnostic only: letting it translate the
+        // whole rig makes the torso orbit even when root and view yaw agree.
+        // Sample the restored native root and unmasked landmarks before writes.
         const auto& head = bones_[0]->world.translate;
+        const auto rootPosition = body_->world.translate;
         std::array<float, 2> heading{};
         if (!body_position::ViewHeading(cameraObject->world.rotate, heading))
             return status_ = Status::invalid_alignment;
@@ -216,7 +218,8 @@ public:
         facingSample_ = body_facing::Compare(heading, body_->world, eyeAvailable ? eye : head);
         const BodyAlignmentFrame frame{{viewEye.x, viewEye.y, viewEye.z},
             {head.x, head.y, head.z}, {heading[0], heading[1]}, body_->world.scale,
-            {eye.x, eye.y, eye.z}, eyeAvailable ? 1u : 0u};
+            {eye.x, eye.y, eye.z}, eyeAvailable ? 1u : 0u,
+            {rootPosition.x, rootPosition.y, rootPosition.z}};
         BodyAlignmentResult alignment{};
         if (measureMath) {
             const auto started = std::chrono::steady_clock::now();
