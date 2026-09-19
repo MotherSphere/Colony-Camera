@@ -14,6 +14,12 @@ remain the published historical release; its tag and binary are unchanged.
 
 ## Graphical settings (optional)
 
+Version 0.3.1 groups controls into aligned label/value forms, compact tabs and
+collapsible sections. Offsets separates per-profile Position from global Transitions
+and Advanced limits. Following separates Movement, Rotation/orbit and Vertical.
+Hover labels for help; Ctrl-click sliders for precise numeric entry. Camera math,
+settings ranges, presets and first-person behavior are unchanged by this UI update.
+
 Install SKSE Menu Framework separately through your mod manager. Version 3.18 is
 the integration target. Open its Mod Control Panel (F1 in the inspected default
 configuration), then choose **Camera Colony**. Pages: General, Third Person,
