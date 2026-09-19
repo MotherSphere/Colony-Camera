@@ -150,7 +150,7 @@ class Menu {
         const auto value = field == 0 ? draft.body_alignment.body_backset : draft.body_alignment.body_side;
         Page(std::format("{}: {:.1f}\n{}\nDistances scale with the body. Alignment must be on. Changes apply after closing the menu; Save settings keeps them for the next session.",
             field == 0 ? "Body backset" : "Body sideways", value,
-            field == 0 ? "0..40: places the body root behind your view. Higher values move the body farther back. Reset alignment uses 12."
+            field == 0 ? "0..40: additional backward body offset. Reset alignment uses 8."
                        : "-20..20: positive moves the body to your right; negative moves it left."),
             {"Decrease", "Increase", "Decrease x5", "Increase x5", "Default", "Back"}, [this, field](auto b) {
                 if (b > 4) { FirstPerson(); return; }

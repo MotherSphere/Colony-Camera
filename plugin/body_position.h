@@ -31,14 +31,14 @@ inline bool ViewHeading(const RE::NiMatrix3& rotation, std::array<float, 2>& res
 }
 
 struct ArmSelection {
-    bool hideNative;
+    bool maskNativeArms;
     std::array<float, 3> boneFactors; // head, left upper arm, right upper arm
 };
 
 // Ordinary sheathed posture uses the body rig's complete shoulder/arm silhouette.
 // Keep the native equipment rig throughout drawing and sheathing, including
 // empty-handed combat. Unknown states also retain it; only a confirmed sheathed
-// state without a light permits hiding the native rig.
+// state without a light permits masking native upper arms, never the root.
 inline ArmSelection SelectArms(RE::WEAPON_STATE weaponState, bool equippedLight) {
     constexpr float masked = 0.0001f;
     return weaponState != RE::WEAPON_STATE::kSheathed || equippedLight
@@ -155,14 +155,19 @@ bool IndependentRoots(const Node* body, const Node* other) {
     return true;
 }
 
-// Convert a horizontal WORLD displacement into the body's parent coordinates.
-// Use the inverse linear transform, so parent translation and a previously stale
-// world position cannot introduce a vertical drift. With a tilted parent local Z
-// can change while world Z is preserved. Nothing is written on a validation failure.
+// Convert a WORLD displacement into the body's parent coordinates.
+// Use the inverse rigid linear transform, so parent translation and a previously stale
+// world position cannot alter the requested displacement. A tilted parent mixes
+// local axes. Nothing is written on a validation failure.
 inline bool Translate(const RE::NiPoint3& local, const RE::NiPoint3& displacement,
     const RE::NiTransform* parent, RE::NiPoint3& result) {
-    if (!Finite(local) || !Finite(displacement) || displacement.z != 0.0f ||
+    if (!Finite(local) || !Finite(displacement) ||
         (parent && !Finite(*parent))) return false;
+    if (parent) for (unsigned i = 0; i < 3; ++i) for (unsigned j = 0; j < 3; ++j) {
+        float dot = 0;
+        for (unsigned k = 0; k < 3; ++k) dot += parent->rotate.entry[i][k] * parent->rotate.entry[j][k];
+        if (std::abs(dot - (i == j ? 1.0f : 0.0f)) > 0.001f) return false;
+    }
     const auto localDisplacement = parent ?
         (parent->rotate.Transpose() * displacement) / parent->scale : displacement;
     const auto translated = local + localDisplacement;

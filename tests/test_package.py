@@ -75,6 +75,7 @@ class PackageTests(unittest.TestCase):
         write(self.root / "CMakeLists.txt", "project(ColonyCamera VERSION 1.2.3 LANGUAGES CXX)\n")
         write(self.root / "LICENSE", "Project complete license fixture\n")
         write(self.root / "THIRD-PARTY-NOTICES.md", "Project attribution fixture\n")
+        write(self.root / "licenses/ImprovedCamera/MPL-2.0.txt", "Complete MPL notice fixture\n")
         write(self.root / "README.md", "Fixture build instructions\n")
         write(self.root / "assets/SKSE/Plugins/ColonyCamera.ini", "[General]\nenabled = true\n")
         dep = self.root / "deps/commonlib"
@@ -146,6 +147,7 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(player.read("SKSE/Plugins/ColonyCamera.ini"), before)
             self.assertIn(self.revision.encode(), player.read("README.txt"))
             notices = player.read("LICENSES.txt")
+            self.assertIn(b"Complete MPL notice fixture", notices)
             self.assertIn(b"EXCEPTIONS.md preserved notice fixture", notices)
             self.assertIn(b"nested/fmt.license.rst preserved notice fixture", notices)
             self.assertIn(b"<html>Complete Rust notice fixture</html>", notices)

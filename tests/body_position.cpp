@@ -70,35 +70,33 @@ int main() {
     // remains available from the draw request through the final sheath frame.
     using WeaponState = RE::WEAPON_STATE;
     const auto idle = body_position::SelectArms(WeaponState::kSheathed, false);
-    assert(idle.hideNative && idle.boneFactors[0] < 0.001f &&
+    assert(idle.maskNativeArms && idle.boneFactors[0] < 0.001f &&
         idle.boneFactors[1] == 1 && idle.boneFactors[2] == 1);
     const std::array weaponCycle{WeaponState::kSheathed, WeaponState::kWantToDraw,
         WeaponState::kDrawing, WeaponState::kDrawn, WeaponState::kWantToSheathe,
         WeaponState::kSheathing, WeaponState::kSheathed};
     for (bool equippedLight : {false, true}) {
-        bool nativeHidden = false;
-        camera::OwnedValue<bool> nativeVisibility;
+        float nativeScale = 1.25f;
+        camera::OwnedValue<float> armScale;
         for (std::size_t frame = 0; frame < weaponCycle.size(); ++frame) {
-            nativeVisibility.Restore(nativeHidden);
+            armScale.Restore(nativeScale);
             const auto policy = body_position::SelectArms(weaponCycle[frame], equippedLight);
             const bool bodyArms = !equippedLight && (frame == 0 || frame == 6);
-            assert(policy.hideNative == bodyArms && policy.boneFactors[0] == idle.boneFactors[0]);
-            if (bodyArms) assert(policy.boneFactors[1] == 1 && policy.boneFactors[2] == 1);
-            else assert(policy.boneFactors[1] < 0.001f && policy.boneFactors[2] < 0.001f);
-            if (policy.hideNative) nativeVisibility.Write(nativeHidden, true);
-            assert(nativeHidden == bodyArms);
+            assert(policy.maskNativeArms == bodyArms);
+            if (bodyArms) armScale.Write(nativeScale,nativeScale * 0.001f);
+            assert(std::abs(nativeScale - (bodyArms ? 0.00125f:1.25f)) < 1e-7f);
         }
-        nativeVisibility.Restore(nativeHidden);
-        assert(!nativeHidden && !nativeVisibility.Active());
+        armScale.Restore(nativeScale);
+        assert(nativeScale == 1.25f && !armScale.Active());
     }
     // Readying fists uses the same actor state even with no equipped weapon.
     const auto fists = body_position::SelectArms(WeaponState::kDrawn, false);
-    assert(!fists.hideNative && fists.boneFactors[1] < 0.001f && fists.boneFactors[2] < 0.001f);
+    assert(!fists.maskNativeArms && fists.boneFactors[1] < 0.001f && fists.boneFactors[2] < 0.001f);
     // Never hide native equipment based on an unrecognized state value.
     for (auto raw : {6u, 7u, (std::numeric_limits<std::uint32_t>::max)()})
         for (bool equippedLight : {false, true}) {
             const auto policy = body_position::SelectArms(static_cast<WeaponState>(raw), equippedLight);
-            assert(!policy.hideNative && policy.boneFactors[0] == idle.boneFactors[0] &&
+            assert(!policy.maskNativeArms && policy.boneFactors[0] == idle.boneFactors[0] &&
                 policy.boneFactors[1] < 0.001f && policy.boneFactors[2] < 0.001f);
         }
     RE::NiPoint3 local{4,5,6}, result{-1,-2,-3};
@@ -160,11 +158,18 @@ int main() {
     assert(body_position::RestoreTranslation(lease, current, nullptr, nullptr));
     assert(current == local);
 
+    assert(body_position::Translate(local, {1,2,3}, &parent, result));
+    assert(Close(parent * result, parent * local + RE::NiPoint3{1,2,3}));
+    const auto rigid = parent.rotate;
+    parent.rotate.entry[0][1] += 0.5f;
+    const auto unmodified = result;
+    assert(!body_position::Translate(local, delta, &parent, result) && result == unmodified);
+    parent.rotate = rigid;
     // All invalid inputs preserve the output, including late arithmetic overflow.
     const auto before = result;
     const auto inf = std::numeric_limits<float>::infinity();
     const auto nan = std::numeric_limits<float>::quiet_NaN();
-    assert(!body_position::Translate(local, {1,2,3}, &parent, result) && result == before);
+
     assert(!body_position::Translate(local, {inf,2,0}, &parent, result) && result == before);
     assert(!body_position::Translate({nan,2,3}, delta, &parent, result) && result == before);
     parent.scale = 0;

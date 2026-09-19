@@ -3,6 +3,18 @@
 Colony Camera's original code is GPL-3.0-or-later; see LICENSE.
 No SmoothCam implementation, presets, UI or assets are included.
 
+The no-headbob body-placement algorithm in src/first_person.rs is adapted from
+ImprovedCameraSE-NG, ArranzCNL and contributors, revision
+2e441c190e46d96eefb7738a3276308e9c36e939,
+ImprovedCamera/source/skyrimse/ImprovedCameraSE.cpp (AdjustModelPosition and
+TranslateThirdPersonModel). Source: https://github.com/ArranzCNL/ImprovedCameraSE-NG/tree/2e441c190e46d96eefb7738a3276308e9c36e939
+The adapted file retains MPL-2.0 and is additionally distributed under
+GPL-3.0-or-later in this combined work pursuant to MPL section 3.3.
+See licenses/ImprovedCamera/MPL-2.0.txt. Modified September 19, 2026: Rust ABI,
+input validation, bounded displacement and parent-transform handling. This is
+a scoped ordinary-first-person adaptation, not full Improved Camera parity.
+
+
 - CommonLibSSE-NG / alandtse CommonLibVR, commit c7662fc59e531f8c14d00665c5ad15a0577dc9b6.
   https://github.com/alandtse/CommonLibVR
   GPL-3.0-or-later and the notices/exceptions in its COPYING.txt, EXCEPTIONS.md and licenses/.

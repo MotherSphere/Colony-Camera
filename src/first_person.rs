@@ -1,4 +1,13 @@
-//! Horizontal body alignment only. This math never moves a camera, changes FOV,
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+//
+// Placement adapted from ImprovedCameraSE-NG AdjustModelPosition(false) and
+// TranslateThirdPersonModel, ArranzCNL and contributors, revision
+// 2e441c190e46d96eefb7738a3276308e9c36e939. Modified 2026-09-19:
+// Rust value ABI, validated inputs, parent-space conversion in C++, bounded output.
+// Additionally available under GPL-3.0-or-later in this combined work under MPL 3.3.
+//! No-headbob reference placement. This math never moves a camera, changes FOV,
 //! moves native first-person arms, or alters a skeleton's scale or rotation.
 
 #[repr(C)]
@@ -6,26 +15,30 @@
 pub struct BodyAlignmentFrame {
     pub camera: [f32; 3],
     pub head: [f32; 3],
-    /// Horizontal published-view forward XY. Normalized here, with no pitch tilt.
+    /// Horizontal rendered-view heading, for diagnostics; placement uses body_rotation.
     pub heading: [f32; 2],
     /// Unsuppressed cumulative skeleton world scale, not a local bone scale.
     pub scale: f32,
-    /// Actual unsuppressed third-person eye landmark, for diagnostics only.
+    /// Actual unsuppressed third-person eye landmark used by reference placement.
     pub eye: [f32; 3],
-    /// Zero selects head-height diagnostics and ignores `eye`; one selects `eye`.
+    /// Must be one for reference placement; missing eyes use native fallback.
     pub eye_available: u32,
     /// Required unmodified third-person locomotion-root world position. Sample
     /// after restoring the previous body lease, before applying this correction.
     pub body_root: [f32; 3],
+    /// Row-major native body rotation, not camera rotation.
+    pub body_rotation: [f32; 9],
+    /// Bits: sneak=1, right=2, left=4, forward=8, back=16.
+    pub movement: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BodyAlignmentOptions {
     pub alignment_enabled: u32,
-    /// Positive places the body root behind the camera, in skeleton units at scale one.
+    /// Additional backward offset in body axes, at scale one; reference default 8.
     pub body_backset: f32,
-    /// Positive moves the body to view-right, in skeleton units at scale one.
+    /// Positive moves the body to body-right, in skeleton units at scale one.
     pub body_side: f32,
 }
 impl Default for BodyAlignmentOptions {
@@ -33,7 +46,7 @@ impl Default for BodyAlignmentOptions {
         // Dormant until the separately gated first-person experiment is enabled.
         Self {
             alignment_enabled: 1,
-            body_backset: 12.0,
+            body_backset: 8.0,
             body_side: 0.0,
         }
     }
@@ -54,7 +67,7 @@ pub struct BodyAlignmentResult {
     /// World-space displacement for a leased third-person root translation.
     /// The native root must be restored before each input frame is sampled.
     pub translation: [f32; 3],
-    /// Camera Z minus selected eye/head landmark Z; diagnostics only, never applied.
+    /// Camera Z minus eye landmark Z; diagnostics only, never applied.
     pub vertical_error: f32,
     pub valid: u32,
 }
@@ -76,52 +89,63 @@ pub fn align_body(frame: BodyAlignmentFrame, options: BodyAlignmentOptions) -> B
     {
         return invalid;
     }
-    let heading_length = frame.heading[0].hypot(frame.heading[1]);
-    if !heading_length.is_finite() || heading_length < 0.0001 {
+    if frame.eye_available != 1 || frame.movement & !31 != 0 {
         return invalid;
     }
-    let forward = frame.heading.map(|v| v / heading_length);
-    let right = [forward[1], -forward[0]];
-    let landmark = if frame.eye_available == 1 {
-        frame.eye
-    } else {
-        frame.head
-    };
-    // Animated eye/head offsets must not move the whole body sideways or fore/aft.
-    // Position the locomotion root relative to the published native camera instead.
-    let separation = [
-        frame.camera[0] - frame.body_root[0],
-        frame.camera[1] - frame.body_root[1],
-    ];
-    // An implausible native gap usually indicates stale/mismatched nodes. Do not
-    // disguise it by saturating a correction or drag the actor's body across a cell.
-    if separation[0].hypot(separation[1]) > 80.0 * frame.scale {
+    let r = frame.body_rotation;
+    if !r.iter().all(|x| x.is_finite()) {
         return invalid;
+    }
+    for i in 0..3 {
+        for j in 0..3 {
+            let dot: f32 = (0..3).map(|k| r[i * 3 + k] * r[j * 3 + k]).sum();
+            if (dot - if i == j { 1.0 } else { 0.0 }).abs() > 0.001 {
+                return invalid;
+            }
+        }
+    }
+    let determinant = r[0] * (r[4] * r[8] - r[5] * r[7]) - r[1] * (r[3] * r[8] - r[5] * r[6])
+        + r[2] * (r[3] * r[7] - r[4] * r[6]);
+    if (determinant - 1.0).abs() > 0.001 {
+        return invalid;
+    }
+    let distance = |a: [f32; 3], b: [f32; 3]| {
+        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+    };
+    // Reference no-headbob policy uses magnitudes, not camera-minus-eye XY.
+    let forward = distance(frame.head, frame.camera) + distance(frame.head, frame.eye);
+    let mut lateral = frame.head[0] - frame.camera[0];
+    let m = frame.movement;
+    if m & 1 != 0 {
+        lateral = 0.0;
+    } else if m & 2 != 0 && m & (8 | 16) == 0 {
+        lateral = lateral.abs();
+    } else if m & 4 != 0 && m & 8 == 0 {
+        lateral = -lateral.abs();
+    } else {
+        lateral = 0.0;
     }
     let mut result = BodyAlignmentResult {
-        vertical_error: frame.camera[2] - landmark[2],
+        vertical_error: frame.camera[2] - frame.eye[2],
         valid: 1,
         ..invalid
     };
     if options.alignment_enabled == 0 {
         return result;
     }
-    for i in 0..2 {
-        result.translation[i] = separation[i] - forward[i] * options.body_backset * frame.scale
-            + right[i] * options.body_side * frame.scale;
+    let local = [
+        options.body_side * frame.scale - lateral,
+        -options.body_backset * frame.scale - forward,
+        0.0,
+    ];
+    for i in 0..3 {
+        result.translation[i] = (0..3).map(|k| r[i * 3 + k] * local[k]).sum();
     }
-    // The relative bound follows from the maximum accepted separation and
-    // options; 128 world units is an additional conservative displacement cap.
-    // A giant/custom rig that exceeds it keeps native placement. The small margin
-    // over 80+hypot(40,20) avoids rejecting a valid endpoint through float rounding.
-    let limit = (124.722 * frame.scale).min(128.0);
-    if !result.translation.iter().all(|v| v.is_finite())
-        || result.translation[0].hypot(result.translation[1]) > limit
+    if !result.translation.iter().all(|x| x.is_finite())
+        || result.translation.iter().map(|x| x * x).sum::<f32>() > 128.0 * 128.0
     {
         return invalid;
     }
-    // Z is deliberately zero: following an animated head vertically would float
-    // the feet above the ground. Horizontal correction still needs visual testing.
     result
 }
 

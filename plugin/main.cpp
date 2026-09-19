@@ -363,7 +363,7 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.7 body-placement candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.8 body-placement candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
             sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
@@ -623,7 +623,7 @@ void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
     }
     const auto& alignment = bodyRenderer.GetAlignmentSample();
     if ((!reportedBodyAlignment || statusChanged) && alignment.available) {
-        spdlog::info("Body alignment sample: phase={} math_valid={} enabled={} scale={:.3f} rendered_eye=({:.2f},{:.2f},{:.2f}) anchor=body_root root=({:.2f},{:.2f},{:.2f}) head=({:.2f},{:.2f},{:.2f}) eye_available={} body_eye=({:.2f},{:.2f},{:.2f}) shift=({:.2f},{:.2f},{:.2f}) height_difference={:.2f} backset={:.1f} sideways={:.1f} world_fov={:.1f}; framing and equipment require visual verification",
+        spdlog::info("Body alignment sample: phase={} math_valid={} enabled={} scale={:.3f} rendered_eye=({:.2f},{:.2f},{:.2f}) placement=ic_no_headbob root=({:.2f},{:.2f},{:.2f}) head=({:.2f},{:.2f},{:.2f}) eye_available={} body_eye=({:.2f},{:.2f},{:.2f}) shift=({:.2f},{:.2f},{:.2f}) height_difference={:.2f} backset={:.1f} sideways={:.1f} world_fov={:.1f}; framing and equipment require visual verification",
             phase, alignment.result.valid, config.body_alignment.alignment_enabled, alignment.frame.scale,
             alignment.frame.camera[0], alignment.frame.camera[1], alignment.frame.camera[2],
             alignment.frame.body_root[0], alignment.frame.body_root[1], alignment.frame.body_root[2],
@@ -846,7 +846,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,7,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,2,8,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -861,7 +861,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.7 body-placement candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.8 body-placement candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

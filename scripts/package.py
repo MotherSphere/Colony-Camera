@@ -159,6 +159,7 @@ def consolidate_notices(root, dependency_notices, rustc):
         raise PackageError("Install rust-docs for the Rust toolchain used by this build")
     notices = {"Project LICENSE": (root / "LICENSE").read_bytes(),
                "Project THIRD-PARTY-NOTICES.md": (root / "THIRD-PARTY-NOTICES.md").read_bytes(),
+               "Improved Camera MPL-2.0": (root / "licenses/ImprovedCamera/MPL-2.0.txt").read_bytes(),
                **dependency_notices,
                "Rust COPYRIGHT-library.html (HTML preserved verbatim)": rust_notice.read_bytes()}
     combined = bytearray(b"Camera Colony - complete distribution license notices\n")

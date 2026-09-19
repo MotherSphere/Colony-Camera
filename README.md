@@ -1,15 +1,11 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.7 is a body-placement development candidate** with configurable
-third-person transitions, native settings menus and an opt-in first-person body
-experiment. It removes animated eye/head offsets from horizontal body placement
-and adds explicit inventory/preview menu boundaries. Visual validation of this
-change is pending. It is not a complete SmoothCam or Improved Camera replacement.
-
-The [urgent first-person handoff](FIX%20TO%20DO%20URGENT.md) records the complete
-defect history, project architecture, attempted fixes, remaining work and visual
-acceptance criteria for this development branch.
+CommonLibSSE-NG bridge. **0.2.8 is an experimental body-placement candidate**.
+It adapts Improved Camera's ordinary no-headbob placement and keeps the native
+first-person root visible while masking unused arm bones. Third-person smoothing
+and the corrected runtime weapon-state access remain in place. Visual validation
+is pending; this is not a complete SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
@@ -91,11 +87,19 @@ positions cannot change the resulting root placement. This fixes that mathematic
 coupling; it does not establish which animation produced the reported pose or
 prove that every outfit now renders correctly.
 
-The numerical backset/side settings are retained, but their reference changes from
-the animated eye to the locomotion root. Start with First Person > Reset alignment
-(backset 12, side 0). No cached pose is calibrated when changing equipment or
-closing a menu. Inventory, Magic, Tween and Map menus explicitly suspend the body
-experiment, including non-pausing variants that retain gameplay controls.
+0.2.8 replaces the 0.2.7 root anchor with Improved Camera's no-headbob
+landmark-distance calculation, rotated through the native body basis. It masks
+unused native upper arms instead of culling the entire first-person root. Drawn
+weapons still select native arms. Start with First Person > Reset alignment
+(backset 8, side 0); saved settings are preserved until explicitly reset.
+Inventory, Magic, Tween and Map menus continue to suspend the body experiment.
+
+This is a scoped port, not the complete Improved Camera renderer. Colony still
+uses its rendered-camera sample and existing model/camera publication hooks;
+headtracking, per-hand policies and special actions have not been ported. The
+existing world-pose ownership checks do not detect every possible child-bone
+writer. Test equipment changes, turning, menus and POV transitions in game before
+using this candidate as a replacement for a working setup.
 
 While the body experiment is enabled, `First-person motion window` log lines
 count applied, native-fallback, not-ready and rejected publications separately
@@ -204,15 +208,15 @@ legacy `half_life`. Existing key remaps are retained; if an older binding alread
 uses F7, an unused menu key is chosen. Unknown/duplicate fields, conflicting keys,
 non-finite numbers and out-of-range values reject the entire file.
 
-First Person provides the body toggle, an alignment toggle and numeric backset/
-lateral controls. In `[first_person]`, `alignment_enabled=true` requests horizontal
-placement of the body root, `body_backset=12` sets its distance behind the camera
-(0-40), and `body_side=0`
-moves it laterally (-20 to 20; positive is the view's horizontal right). Units are relative
-to skeleton scale 1. Unsafe positions or excessive translations retain native
-placement. Disable alignment to compare native root placement while keeping the
-body experiment enabled. Save persists these settings; the native camera and
-native combat-arm transforms remain unchanged.
+First Person provides body/alignment toggles and numeric backward/lateral controls.
+`alignment_enabled=true` requests reference no-headbob placement. `body_backset=8`
+is an additional backward offset (0-40), not an absolute camera-to-body distance.
+`body_side=0` adds lateral offset (-20 to 20; positive is body-right). Offsets are
+scaled by skeleton scale. The native body basis is preserved, so a tilted basis
+can produce a vertical component. Missing eyes, non-rigid transforms or excessive
+displacements fall back to native placement. Disable alignment to compare native
+placement while keeping body rendering enabled. Save persists settings. The
+camera is not moved; unused native arm bones are temporarily scaled, then restored.
 
 | Profile setting | Meaning and accepted range |
 | --- | --- |
@@ -360,6 +364,9 @@ spdlog, DirectXMath and DirectXTK; Rust runtime notices match the build toolchai
 
 [SmoothCam](https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f3960ec4de2b28af5e863c794a3924e6a2dfdd)
 and [Improved Camera SE-NG](https://github.com/ArranzCNL/ImprovedCameraSE-NG/tree/2e441c190e46d96eefb7738a3276308e9c36e939)
-were inspected as functional/engine references. Their implementation, translated
-code, scripts, UI, assets and presets are not included. This is independently
-maintained code; source inspection is disclosed without a clean-room claim.
+are credited references. `src/first_person.rs` adapts Improved Camera's
+`AdjustModelPosition(false)` / `TranslateThirdPersonModel` placement under MPL-2.0,
+with additional GPL-3.0-or-later availability for this combined work under MPL 3.3.
+The original MPL text is in `licenses/ImprovedCamera/MPL-2.0.txt` and included in
+the player package notices. No upstream binary, scripts, UI, assets or presets
+are supplied. See THIRD-PARTY-NOTICES.md for exact provenance.

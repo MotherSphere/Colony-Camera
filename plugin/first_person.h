@@ -38,7 +38,8 @@ class Renderer {
     std::array<camera::OwnedValue<float>, 3> scales_;
     std::array<Hidden, 20> hidden_;
     camera::OwnedValue<bool> bodyVisibility_;
-    camera::OwnedValue<bool> nativeVisibility_;
+    std::array<RE::NiPointer<RE::NiAVObject>, 2> nativeArmBones_;
+    std::array<camera::OwnedValue<float>, 2> nativeArmScales_;
     camera::OwnedValue<RE::NiPoint3> bodyPosition_;
     RE::NiPointer<RE::NiNode> positionParent_;
     RE::NiPointer<RE::NiNode> renderedParent_;
@@ -125,9 +126,13 @@ public:
         for (std::size_t i = 0; i < bones_.size(); ++i)
             if (bones_[i]) transformsChanged |= scales_[i].Restore(bones_[i]->local.scale);
         for (auto& entry : hidden_) entry.Restore();
-        if (nativeArms_) {
-            bool hidden = nativeArms_->GetAppCulled();
-            if (nativeVisibility_.Restore(hidden)) nativeArms_->SetAppCulled(hidden);
+        bool nativeChanged = false;
+        for (std::size_t i = 0; i < nativeArmBones_.size(); ++i)
+            if (nativeArmBones_[i]) nativeChanged |= nativeArmScales_[i].Restore(nativeArmBones_[i]->local.scale);
+        if (nativeChanged && nativeArms_) {
+            RE::NiUpdateData update{};
+            update.flags.set(RE::NiUpdateData::Flag::kDisableCollision);
+            nativeArms_->Update(update);
         }
         if (body_) {
             bool hidden = body_->GetAppCulled();
@@ -145,6 +150,7 @@ public:
     void Reset() {
         Restore();
         for (auto& bone : bones_) bone.reset();
+        for (auto& bone : nativeArmBones_) bone.reset();
         nativeArms_.reset();
         eyeNode_.reset();
         body_.reset();
@@ -182,6 +188,15 @@ public:
         if (!body_) return status_ = Status::missing_body;
         if (!nativeArms_ || !body_position::IndependentRoots(body_.get(), nativeArms_.get()))
             return status_ = Status::missing_native_arms;
+        static const std::array<RE::BSFixedString, 2> nativeNames{
+            "NPC L UpperArm [LUar]", "NPC R UpperArm [RUar]"};
+        for (std::size_t i = 0; i < nativeNames.size(); ++i) {
+            nativeArmBones_[i].reset(nativeArms_->GetObjectByName(nativeNames[i]));
+            if (!nativeArmBones_[i] || !Finite(nativeArmBones_[i]->local) ||
+                !body_position::IndependentRoots(nativeArmBones_[i].get(),
+                    static_cast<const RE::NiAVObject*>(cameraObject)))
+                return status_ = Status::unsupported_skeleton;
+        }
         if (!body_position::IndependentRoots(body_.get(), static_cast<const RE::NiAVObject*>(cameraObject)))
             return status_ = Status::invalid_alignment;
         if (!Finite(body_->local) || !Finite(body_->world)) return status_ = Status::invalid_transform;
@@ -205,9 +220,8 @@ public:
             body_position::WorldMatchesLocal(eyeNode_->local, eyeNode_->world,
                 eyeNode_->parent ? &eyeNode_->parent->world : nullptr, body_->world.scale);
 
-        // Position the locomotion root relative to the final displayed camera.
-        // Animated eye/head motion is diagnostic only: letting it translate the
-        // whole rig makes the torso orbit even when root and view yaw agree.
+        // Reference no-headbob placement uses landmark distances and native body
+        // axes. The rendered heading is diagnostic, not a horizontal root target.
         // Sample the restored native root and unmasked landmarks before writes.
         const auto& head = bones_[0]->world.translate;
         const auto rootPosition = body_->world.translate;
@@ -216,10 +230,16 @@ public:
             return status_ = Status::invalid_alignment;
         const auto eye = eyeAvailable ? eyeNode_->world.translate : RE::NiPoint3{};
         facingSample_ = body_facing::Compare(heading, body_->world, eyeAvailable ? eye : head);
-        const BodyAlignmentFrame frame{{viewEye.x, viewEye.y, viewEye.z},
+        BodyAlignmentFrame frame{{viewEye.x, viewEye.y, viewEye.z},
             {head.x, head.y, head.z}, {heading[0], heading[1]}, body_->world.scale,
             {eye.x, eye.y, eye.z}, eyeAvailable ? 1u : 0u,
             {rootPosition.x, rootPosition.y, rootPosition.z}};
+        for (unsigned i = 0; i < 3; ++i) for (unsigned j = 0; j < 3; ++j)
+            frame.body_rotation[i * 3 + j] = body_->world.rotate.entry[i][j];
+        const auto* actorState = player->AsActorState();
+        const auto& movement = actorState->actorState1;
+        frame.movement = (movement.sneaking ? 1u : 0u) | (movement.movingRight ? 2u : 0u) |
+            (movement.movingLeft ? 4u : 0u) | (movement.movingForward ? 8u : 0u) | (movement.movingBack ? 16u : 0u);
         BodyAlignmentResult alignment{};
         if (measureMath) {
             const auto started = std::chrono::steady_clock::now();
@@ -245,7 +265,7 @@ public:
         // ActorState's base offset varies with the runtime. An inherited call on
         // PlayerCharacter would use the compile-time layout in this multi-build.
         const auto armsPolicy = body_position::SelectArms(player->AsActorState()->GetWeaponState(), equippedLight);
-        usesNativeArms_ = !armsPolicy.hideNative;
+        usesNativeArms_ = !armsPolicy.maskNativeArms;
         std::array<RE::NiTransform, 3> expectedBones{};
         for (std::size_t i = 0; i < bones_.size(); ++i) {
             expectedBones[i] = bones_[i]->world;
@@ -261,9 +281,13 @@ public:
         // collapsing shoulder vertices weighted partly to the upper-arm bones.
         for (std::size_t i = 0; i < bones_.size(); ++i)
             scales_[i].Write(bones_[i]->local.scale, bones_[i]->local.scale * armsPolicy.boneFactors[i]);
-        if (armsPolicy.hideNative) {
-            bool hidden = nativeArms_->GetAppCulled();
-            if (nativeVisibility_.Write(hidden, true)) nativeArms_->SetAppCulled(hidden);
+        if (armsPolicy.maskNativeArms) {
+            for (std::size_t i = 0; i < nativeArmBones_.size(); ++i)
+                nativeArmScales_[i].Write(nativeArmBones_[i]->local.scale,
+                    nativeArmBones_[i]->local.scale * 0.001f);
+            RE::NiUpdateData update{};
+            update.flags.set(RE::NiUpdateData::Flag::kDisableCollision);
+            nativeArms_->Update(update);
         }
         if (const auto& biped = player->GetBiped(false); biped) {
             for (auto slot : {RE::BIPED_OBJECTS::kHead, RE::BIPED_OBJECTS::kHair,
