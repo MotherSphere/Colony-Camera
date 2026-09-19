@@ -1,7 +1,7 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.8 is an experimental body-placement candidate**.
+CommonLibSSE-NG bridge. **0.2.9 is an experimental inventory-transition candidate**.
 It adapts Improved Camera's ordinary no-headbob placement and keeps the native
 first-person root visible while masking unused arm bones. Third-person smoothing
 and the corrected runtime weapon-state access remain in place. Visual validation
@@ -92,7 +92,13 @@ landmark-distance calculation, rotated through the native body basis. It masks
 unused native upper arms instead of culling the entire first-person root. Drawn
 weapons still select native arms. Start with First Person > Reset alignment
 (backset 8, side 0); saved settings are preserved until explicitly reset.
-Inventory, Magic, Tween and Map menus continue to suspend the body experiment.
+0.2.9 keeps body rendering active behind inventory while the native camera stays
+in first person, including paused inventory. This avoids releasing the body pose
+on menu opening. Equipment changes still reacquire skeleton nodes; no frozen pose
+or timer is used. Other pause owners, blocking menus and camera changes retain
+native fallback. Gameplay controls remain disabled by the menu as usual.
+Magic, Tween and Map menus continue to suspend the body experiment.
+The opening transition still requires visual confirmation with Grid Inventory.
 
 This is a scoped port, not the complete Improved Camera renderer. Colony still
 uses its rendered-camera sample and existing model/camera publication hooks;

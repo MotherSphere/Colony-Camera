@@ -9,6 +9,14 @@
 #include <limits>
 
 namespace body_position {
+// Rendering can continue behind inventory without enabling gameplay controls.
+// Any other pause owner or blocking menu retains native fallback.
+constexpr bool RenderInventoryBody(bool firstPerson, bool inventoryOpen,
+    bool blockingMenu, unsigned pauseCount, bool inventoryPauses) {
+    return firstPerson && inventoryOpen && !blockingMenu &&
+        pauseCount <= (inventoryPauses ? 1u : 0u);
+}
+
 // NiCamera's published basis uses column 0 for depth and column 2 for screen X.
 // Verified from the native world-to-camera matrix routine on the target runtime.
 // For ordinary native views without roll, screen-right keeps the same horizontal

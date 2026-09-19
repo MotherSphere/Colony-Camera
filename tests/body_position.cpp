@@ -21,6 +21,15 @@ RE::NiMatrix3 NoRollView(float yaw, float pitch) {
 }
 
 int main() {
+    // Inventory opening must not release the body just because input/pausing changed.
+    static_assert(body_position::RenderInventoryBody(true, true, false, 1, true));
+    static_assert(body_position::RenderInventoryBody(true, true, false, 0, false));
+    static_assert(!body_position::RenderInventoryBody(false, true, false, 1, true));
+    static_assert(!body_position::RenderInventoryBody(true, false, false, 0, false));
+    static_assert(!body_position::RenderInventoryBody(true, true, true, 1, true));
+    static_assert(!body_position::RenderInventoryBody(true, true, false, 2, true));
+    static_assert(!body_position::RenderInventoryBody(true, true, false, 1, false));
+
     // Published view heading must remain stable through yaw and look-up/down,
     // including a vertical view where projected forward has no usable length.
     std::array<float, 2> heading{};

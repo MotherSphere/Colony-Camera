@@ -273,6 +273,21 @@ bool PreviewMenuOpen(RE::UI* ui) {
     return false;
 }
 
+bool InventoryBodyVisible() {
+    auto* ui = RE::UI::GetSingleton();
+    auto* camera = RE::PlayerCamera::GetSingleton();
+    if (!ui || !camera || !camera->currentState) return false;
+    const auto inventory = ui->GetMenu(RE::InventoryMenu::MENU_NAME);
+    const bool blocked = settingsMenu.IsOpen() || ui->IsMenuOpen("Dialogue Menu") ||
+        ui->IsMenuOpen("Loading Menu") || ui->IsMenuOpen("Console") ||
+        ui->IsMenuOpen("Journal Menu") || ui->IsMenuOpen(RE::MagicMenu::MENU_NAME) ||
+        ui->IsMenuOpen(RE::TweenMenu::MENU_NAME) || ui->IsMenuOpen(RE::MapMenu::MENU_NAME);
+    return body_position::RenderInventoryBody(
+        camera->currentState->id == RE::CameraState::kFirstPerson,
+        inventory && ui->IsMenuOpen(RE::InventoryMenu::MENU_NAME), blocked,
+        ui->numPausesGame, inventory && inventory->PausesGame());
+}
+
 CameraDecision Coordinate(RE::TESCameraState* current, bool inputEnabled) {
     auto* camera = RE::PlayerCamera::GetSingleton();
     auto* player = RE::PlayerCharacter::GetSingleton();
@@ -284,9 +299,11 @@ CameraDecision Coordinate(RE::TESCameraState* current, bool inputEnabled) {
     if (current && current->id == RE::CameraState::kFirstPerson) context.camera_mode = CC_FIRST_PERSON;
     if (current && camera && player && ui && current->camera == camera
         && camera->currentState.get() == current && camera->cameraTarget.get().get() == player) context.flags |= CC_AVAILABLE;
-    if (controls && controls->IsMovementControlsEnabled() && inputEnabled) context.flags |= CC_CONTROLS;
-    if (!ui || ui->GameIsPaused() || ui->IsMenuOpen("Dialogue Menu") || ui->IsMenuOpen("Loading Menu")
-        || ui->IsMenuOpen("Console") || PreviewMenuOpen(ui) || settingsMenu.IsOpen()) context.flags |= CC_MENU;
+    const bool inventoryBody = InventoryBodyVisible();
+    // This flag authorizes body rendering only; it does not change ControlMap.
+    if (inventoryBody || (controls && controls->IsMovementControlsEnabled() && inputEnabled)) context.flags |= CC_CONTROLS;
+    if (!inventoryBody && (!ui || ui->GameIsPaused() || ui->IsMenuOpen("Dialogue Menu") || ui->IsMenuOpen("Loading Menu")
+        || ui->IsMenuOpen("Console") || PreviewMenuOpen(ui) || settingsMenu.IsOpen())) context.flags |= CC_MENU;
     if (player && context.enabled && (context.camera_mode == CC_THIRD_PERSON || context.first_person_enabled)) {
         const auto* actor = player->AsActorState();
         if (actor->GetLifeState() != RE::ACTOR_LIFE_STATE::kAlive) context.flags |= CC_DEAD;
@@ -363,7 +380,7 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.8 body-placement candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.9 body-placement candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
             sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
@@ -665,6 +682,8 @@ void CameraViewUpdate(RE::TESCamera* self) {
     auto* camera = RE::PlayerCamera::GetSingleton();
     if (!self || !camera || self != camera) { originalCameraViewUpdate(self); return; }
     const auto beforeState = camera->currentState;
+    const bool hadFirstView = firstPublishedState == beforeState &&
+        firstPublishedCamera.get() == RenderedCamera(camera) && firstPublishedCamera;
     const bool first = camera->currentState && camera->currentState->id == RE::CameraState::kFirstPerson;
     Probe probe(first, config.enabled && config.first_person_enabled, 2);
     auto stamp = probe.Mark();
@@ -679,12 +698,14 @@ void CameraViewUpdate(RE::TESCamera* self) {
     // TESCamera can Begin a new POV without updating its view until the next
     // call. Never align a new first-person body to the previous third-person eye.
     if (!camera || self != camera || !first || camera->currentState != beforeState
-        || firstUpdatedInView != beforeState.get()) {
+        || (firstUpdatedInView != beforeState.get() && !(hadFirstView && InventoryBodyVisible()))) {
         lastBodyView = {};
         bodyRenderer.Reset();
         if (first) TraceBody(1, BodyOutcome::view_not_ready);
         return;
     }
+    // Paused inventory may skip FirstPersonState::Update. The enclosing camera
+    // pass has completed and the same first-person state is still current.
     firstPublishedState = camera->currentState;
     firstPublishedCamera.reset(RenderedCamera(camera));
     // Reconcile again after the final camera pass. If model/camera order changes,
@@ -732,7 +753,7 @@ public:
         if (auto* tasks = SKSE::GetTaskInterface()) tasks->AddTask([] {
             // A delayed open notification must not clear a new gameplay pose
             // after the menu has already closed. There is no persistent gate.
-            if (!PreviewMenuOpen(RE::UI::GetSingleton())) return;
+            if (!PreviewMenuOpen(RE::UI::GetSingleton()) || InventoryBodyVisible()) return;
             bodyRenderer.Reset();
             ResetFirstView();
             lastBodyView = {};
@@ -846,7 +867,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,8,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,2,9,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -861,7 +882,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.8 body-placement candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.9 body-placement candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};
