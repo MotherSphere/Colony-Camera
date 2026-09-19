@@ -29,6 +29,8 @@ struct ThirdOptions {
     std::uint32_t pitch_enabled, pitch_after, pitch_curve;
     float pitch_max_angle, pitch_zoom; // positive downward pitch degrees, signed local Y
     std::uint32_t mirror_clamp;
+    std::uint32_t preset_geometry; // 1: preset boom distance and world-vertical height
+    float min_distance, zoom_scale;
 };
 struct AdvancedFrame {
     CameraFrame native; // unmodified engine camera, before plugin correction
@@ -37,6 +39,7 @@ struct AdvancedFrame {
     float pitch_degrees; // positive downward; upward pitch does not activate zoom
     float native_side, native_up; // actual interpolated native local offsets, not INI targets
     std::uint32_t shoulder_mirrored;
+    float zoom; // max(0, targetZoomOffset - fMinCurrentZoom)
 };
 struct AdvancedState {
     float position[3], native[3];
@@ -47,8 +50,8 @@ struct AdvancedState {
     float elapsed[3]; // side/up, depth, FOV transition clocks
 };
 static_assert(sizeof(Follow) == 20 && sizeof(AdvancedProfile) == 76);
-static_assert(sizeof(ThirdOptions) == 4340 && alignof(ThirdOptions) == 4);
-static_assert(sizeof(AdvancedFrame) == 76 && sizeof(AdvancedState) == 128);
+static_assert(sizeof(ThirdOptions) == 4352 && alignof(ThirdOptions) == 4);
+static_assert(sizeof(AdvancedFrame) == 80 && sizeof(AdvancedState) == 128);
 static_assert(offsetof(ThirdOptions, profiles) == 8 && offsetof(ThirdOptions, clamp_mask) == 4288);
 static_assert(offsetof(AdvancedFrame, focus) == 40 && offsetof(AdvancedFrame, shoulder_mirrored) == 72);
 static_assert(offsetof(AdvancedState, anchor) == 28 && offsetof(AdvancedState, elapsed) == 116);

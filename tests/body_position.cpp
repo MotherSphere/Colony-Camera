@@ -21,6 +21,15 @@ RE::NiMatrix3 NoRollView(float yaw, float pitch) {
 }
 
 int main() {
+    Node skeleton, oldBranch{&skeleton}, cachedBone{&oldBranch};
+    assert(body_position::AttachedTo(&cachedBone, &skeleton));
+    oldBranch.parent = nullptr; // Replacement below an unchanged root.
+    assert(!body_position::AttachedTo(&cachedBone, &skeleton));
+    Node replacement{&skeleton};
+    assert(body_position::AttachedTo(&replacement, &skeleton));
+    oldBranch.parent = &cachedBone; // Malformed ancestry must terminate.
+    assert(!body_position::AttachedTo(&cachedBone, &skeleton));
+
     // Inventory opening must not release the body just because input/pausing changed.
     static_assert(body_position::RenderInventoryBody(true, true, false, 1, true));
     static_assert(body_position::RenderInventoryBody(true, true, false, 0, false));

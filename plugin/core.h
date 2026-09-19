@@ -103,7 +103,7 @@ struct CameraDecision {
 };
 static_assert(std::is_standard_layout_v<CameraState> && std::is_trivially_copyable_v<CameraConfig>);
 static_assert(sizeof(CameraState) == 64 && sizeof(CameraFrame) == 40);
-static_assert(sizeof(CameraProfile) == 40 && sizeof(CameraConfig) == 4664);
+static_assert(sizeof(CameraProfile) == 40 && sizeof(CameraConfig) == 4676);
 static_assert(sizeof(BodyAlignmentFrame) == 104 && sizeof(BodyAlignmentOptions) == 12 && sizeof(BodyAlignmentResult) == 20);
 static_assert(offsetof(BodyAlignmentFrame, eye) == 36 && offsetof(BodyAlignmentFrame, eye_available) == 48);
 static_assert(offsetof(BodyAlignmentFrame, body_root) == 52);

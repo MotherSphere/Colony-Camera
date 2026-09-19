@@ -573,3 +573,80 @@ fn escaped_paths_and_unicode_values_obey_the_same_budget() {
     assert!(result.report.len() <= 1024 * 1024);
     assert_eq!(result.report.matches("Report truncated:").count(), 1);
 }
+
+#[test]
+fn imported_standing_distance_keeps_camera_behind_target_at_rest() {
+    use colony_camera::advanced::{step_advanced, AdvancedFrame, AdvancedState};
+    use colony_camera::Frame;
+    // Geometry of the reported preset: +140 is relative to a 250-unit boom,
+    // not relative to the engine camera's possibly much shorter current boom.
+    let result = import(json!({"minCameraFollowDistance":250.0,"zoomMul":1.0,
+        "standing":{"sideOffset":0.0,"zoomOffset":140.0,"upOffset":50.0}}));
+    let frame = AdvancedFrame {
+        native: Frame {
+            position: [0.0, -80.0, 120.0],
+            dt: 1.0 / 60.0,
+            ..Frame::default()
+        },
+        focus: [0.0, 0.0, 120.0],
+        ..AdvancedFrame::default()
+    };
+    let mut state = step_advanced(AdvancedState::default(), frame, &result.config.third);
+    assert_eq!(state.position, [0.0, -110.0, 170.0]);
+    for _ in 0..600 {
+        state = step_advanced(state, frame, &result.config.third);
+    }
+    assert_eq!(state.position, [0.0, -110.0, 170.0]);
+}
+
+#[test]
+fn imported_height_stays_world_vertical_when_looking_down() {
+    use colony_camera::advanced::{step_advanced, AdvancedFrame, AdvancedState};
+    use colony_camera::Frame;
+    let a = import(json!({"minCameraFollowDistance":250.0,"standing":{"upOffset":0.0}}));
+    let b = import(json!({"minCameraFollowDistance":250.0,"standing":{"upOffset":50.0}}));
+    let half = (-30.0_f32).to_radians() / 2.0;
+    let frame = AdvancedFrame {
+        native: Frame {
+            position: [0.0, -80.0, 120.0],
+            rotation: [half.cos(), half.sin(), 0.0, 0.0],
+            ..Frame::default()
+        },
+        focus: [0.0, 0.0, 120.0],
+        ..AdvancedFrame::default()
+    };
+    let low = step_advanced(AdvancedState::default(), frame, &a.config.third);
+    let high = step_advanced(AdvancedState::default(), frame, &b.config.third);
+    assert!((high.position[1] - low.position[1]).abs() < 0.001);
+    assert!((high.position[2] - low.position[2] - 50.0).abs() < 0.001);
+}
+
+#[test]
+fn imported_distance_uses_zoom_scale_and_survives_save_reload() {
+    use colony_camera::advanced::{step_advanced, AdvancedFrame, AdvancedState};
+    use colony_camera::{parse_config, serialize_config, Frame};
+    let imported = import(json!({"minCameraFollowDistance":250.0,"zoomMul":20.0,
+        "standing":{"sideOffset":0.0,"zoomOffset":140.0,"upOffset":50.0}}));
+    let saved = parse_config(&serialize_config(&imported.config).unwrap()).unwrap();
+    assert_eq!(saved, imported.config);
+    assert_eq!(saved.third.preset_geometry, 1);
+    for (zoom, expected) in [(0.0, -110.0), (0.5, -120.0), (2.0, -150.0)] {
+        let f = AdvancedFrame {
+            native: Frame {
+                position: [0.0, -80.0, 120.0],
+                ..Frame::default()
+            },
+            focus: [0.0, 0.0, 120.0],
+            zoom,
+            ..AdvancedFrame::default()
+        };
+        let s = step_advanced(AdvancedState::default(), f, &saved.third);
+        assert_eq!(s.position, [0.0, expected, 170.0]);
+    }
+    for bad in [
+        json!({"minCameraFollowDistance":-1}),
+        json!({"zoomMul":10001}),
+    ] {
+        assert!(import_smoothcam(&bad.to_string(), Config::default()).is_err());
+    }
+}

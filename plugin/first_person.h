@@ -63,11 +63,7 @@ class Renderer {
     }
 
     bool Attached(const RE::NiAVObject* node) const {
-        // A bounded ancestry check handles retained nodes detached by equipment or
-        // skeleton replacement without following a malformed chain indefinitely.
-        for (unsigned depth = 0; node && depth < 64; ++depth, node = node->parent)
-            if (node == body_.get()) return true;
-        return false;
+        return body_position::AttachedTo(node, body_.get());
     }
 
     void Hide(RE::NiAVObject* node) {

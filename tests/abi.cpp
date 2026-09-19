@@ -123,6 +123,12 @@ int main() {
     assert(advanced.initialized == 1 && advanced.position[0] == 28 && advanced.position[2] == 0);
     assert(advanced.fov == 83 && advanced.native[0] == 10);
     assert(cc_step_advanced(&advanced, &advancedFrame, &options, &advanced) == 1);
+    // Exercise all newly appended fields across the C++/Rust boundary.
+    options.preset_geometry = 1; options.min_distance = 250; options.zoom_scale = 20;
+    options.profiles[10].offset[1] = 140; options.profiles[10].offset[2] = 50;
+    advancedFrame.focus[2] = 120; advancedFrame.zoom = 2;
+    assert(cc_step_advanced(&initial, &advancedFrame, &options, &advanced) == 0);
+    assert(advanced.position[0] == 28 && advanced.position[1] == -150 && advanced.position[2] == 170);
     options.profiles[10].world.curve = 99;
     const auto intact = advanced;
     assert(cc_step_advanced(&initial, &advancedFrame, &options, &advanced) == 3);

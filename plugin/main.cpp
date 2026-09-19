@@ -405,7 +405,7 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.3.1 advanced-camera candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.3.2 advanced-camera candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
             sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
@@ -522,14 +522,44 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     AdvancedState advancedCandidate{};
     bool advanced = false;
     if (advancedSelected) {
-        const auto focus = player->GetPosition();
+        auto focus = player->GetPosition();
+        float presetZoom = 0.0f;
+        if (config.third.preset_geometry) {
+            // Cache only within this loaded body. Perspective/menu resets refresh
+            // the landmark after any first-person body lease was restored.
+            static RE::NiPointer<RE::NiAVObject> focusRoot, focusNode;
+            auto* body = player->Get3D(false);
+            if (reset || body != focusRoot.get() ||
+                !body_position::AttachedTo<RE::NiAVObject>(focusNode.get(), body)) {
+                focusNode.reset(); focusRoot.reset(body);
+                if (body) for (const char* name : {"Camera3rd [Cam3]", "NPC Head [Head]", "NPC Head"}) {
+                    if (auto* node = body->GetObjectByName(name)) { focusNode.reset(node); break; }
+                }
+            }
+            // No usable landmark: keep the native result, never orbit the feet.
+            if (!focusNode || !std::isfinite(focusNode->world.translate.z)) {
+                state = {}; advancedState = {}; return;
+            }
+            focus.z = focusNode->world.translate.z;
+            float minimumZoom = 0.2f;
+            if (auto* settings = RE::INISettingCollection::GetSingleton()) {
+                if (auto* value = settings->GetSetting("fMinCurrentZoom:Camera")) minimumZoom = value->GetFloat();
+            }
+            if (!std::isfinite(minimumZoom) || !std::isfinite(self->targetZoomOffset)) {
+                state = {}; advancedState = {}; return;
+            }
+            presetZoom = (std::max)(0.0f, self->targetZoomOffset - minimumZoom);
+        }
         // Camera-local forward is +Y. Negative elevation is downward pitch;
         // unlike actor pitch this includes free-look and other camera rotation.
         const float norm = q.w*q.w + q.x*q.x + q.y*q.y + q.z*q.z;
         const float pitch = norm > 0.0f
             ? -std::asin(std::clamp(2.0f*(q.w*q.x + q.y*q.z)/norm, -1.0f, 1.0f))*57.2957795f : 0.0f;
         AdvancedFrame input{frame, {focus.x, focus.y, focus.z}, group, stance, pitch,
-            self->posOffsetActual.x, self->posOffsetActual.z, leftShoulder ? 1u : 0u};
+            self->posOffsetActual.x, self->posOffsetActual.z, leftShoulder ? 1u : 0u, presetZoom};
+        if (!reportedFrame) spdlog::info("Advanced geometry: preset={} group={} stance={} focus=({:.2f},{:.2f},{:.2f}) zoom={:.3f} base={:.2f} scale={:.2f}",
+            config.third.preset_geometry, group, stance, focus.x, focus.y, focus.z,
+            presetZoom, config.third.min_distance, config.third.zoom_scale);
         const auto result = cc_step_advanced(&advancedState, &input, &config.third, &advancedCandidate);
         if (result) { state = {}; advancedState = {}; return; }
         advanced = advancedCandidate.initialized != 0;
@@ -931,7 +961,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,3,1,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,3,2,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -946,7 +976,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.3.1 advanced-camera candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.3.2 advanced-camera candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

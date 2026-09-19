@@ -239,9 +239,9 @@ fn pointer_abi_has_expected_layout_and_rejects_overlap_without_writes() {
     use std::mem::{align_of, offset_of, size_of};
     assert_eq!(
         (size_of::<ThirdOptions>(), align_of::<ThirdOptions>()),
-        (4340, 4)
+        (4352, 4)
     );
-    assert_eq!(size_of::<AdvancedFrame>(), 76);
+    assert_eq!(size_of::<AdvancedFrame>(), 80);
     assert_eq!(size_of::<AdvancedState>(), 128);
     assert_eq!(offset_of!(AdvancedState, elapsed), 116);
     let o = options();
@@ -626,4 +626,32 @@ fn nonfinite_and_out_of_bound_inputs_cannot_publish_camera_results() {
         assert!(!bad.valid());
         assert_eq!(step_advanced(initial, frame(0.01), &bad).initialized, 0);
     }
+}
+
+#[test]
+fn older_advanced_settings_keep_native_geometry_and_new_fields_are_validated() {
+    let before = options();
+    let mut value = serde_json::to_value(before).unwrap();
+    for key in ["preset_geometry", "min_distance", "zoom_scale"] {
+        value.as_object_mut().unwrap().remove(key);
+    }
+    let restored: ThirdOptions = serde_json::from_value(value).unwrap();
+    assert_eq!(before, restored);
+    for (mode, distance, scale) in [(2, 250.0, 1.0), (1, -1.0, 1.0), (1, 250.0, f32::NAN)] {
+        let bad = ThirdOptions {
+            preset_geometry: mode,
+            min_distance: distance,
+            zoom_scale: scale,
+            ..before
+        };
+        assert!(!bad.valid());
+    }
+    let bad = AdvancedFrame {
+        zoom: f32::NAN,
+        ..frame(0.016)
+    };
+    assert_eq!(
+        step_advanced(AdvancedState::default(), bad, &before).initialized,
+        0
+    );
 }

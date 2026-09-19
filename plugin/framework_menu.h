@@ -116,12 +116,14 @@ inline void Submit(bool save) {
         const bool saved = !save || settings::Write(ini, value);
         std::lock_guard lock(mutex);
         latest = draft = value; busy = dirty = false;
+        spdlog::info("Menu Framework settings applied: save={} saved={} advanced={} preset_geometry={}",
+            save, saved, value.third.enabled, value.third.preset_geometry);
         status = saved ? (save ? "Applied and saved." : "Applied. Save to keep settings after restart.")
             : "Applied, but saving failed. Previous INI retained.";
     });
 }
 inline bool Begin() {
-    ImGuiMCP::TextUnformatted("Camera Colony 0.3.1");
+    ImGuiMCP::TextUnformatted("Camera Colony 0.3.2");
     ImGuiMCP::SameLine();
     ImGuiMCP::TextUnformatted(busy ? "  Applying..." : dirty ? "  Draft modified" : "  Draft matches active settings");
     if (busy) return false;
@@ -175,6 +177,15 @@ inline void __stdcall ThirdPerson() {
     Toggle("Enable third-person effects", draft.third_person_enabled);
     Toggle("Use advanced profiles", draft.third.enabled);
     Help("Off: use Legacy Profiles. On: separate movement and weapon profiles, with configurable response curves.");
+    if (draft.third.enabled && ImGuiMCP::CollapsingHeader("Distance and height model")) {
+        Toggle("Use preset distance and world height", draft.third.preset_geometry);
+        Help("Enabled automatically by a new SmoothCam import. Off retains native-relative Colony geometry.");
+        if (draft.third.preset_geometry && Form("preset-distance")) {
+            Slider("Base distance", draft.third.min_distance, 0, 10000, "Distance behind the follow anchor before profile depth and mouse-wheel zoom.");
+            Slider("Zoom scale", draft.third.zoom_scale, 0, 10000, "Distance added per native zoom step. SmoothCam zoomMul.");
+            ImGuiMCP::EndTable();
+        }
+    }
     ImGuiMCP::SeparatorText("Where to adjust your camera");
     Wrapped("Offsets: position, field of view and transitions.\nFollowing: how the camera follows movement and rotation.\nAiming: zoom when looking down.\nPresets: load, import or save a camera setup.");
 }
@@ -261,8 +272,8 @@ inline void __stdcall Offsets() {
             ImGuiMCP::SeparatorText("Camera position");
             if (Form("position")) {
                 Slider("Sideways (X)", p.offset[0], -1000, 1000, "Absolute shoulder position in game units. Negative is left, positive is right.");
-                Slider("Depth (Y)", p.offset[1], -1000, 1000, "Added to native camera zoom. Positive moves forward, negative moves backward.");
-                Slider("Height (Z)", p.offset[2], -1000, 1000, "Absolute shoulder height in camera axes, in game units.");
+                Slider("Depth (Y)", p.offset[1], -1000, 1000, "Added to the selected distance model. Positive moves forward, negative moves backward.");
+                Slider("Height (Z)", p.offset[2], -1000, 1000, "Preset model: world-vertical height above the follow anchor. Native model: camera-local shoulder height.");
                 Slider("Field of view offset", p.fov, -60, 60, "Degrees added to the native field of view. Zero keeps the native FOV.");
                 ImGuiMCP::EndTable();
             }
@@ -379,7 +390,9 @@ inline bool ImportSmoothCam(const std::filesystem::path& path) {
         return false;
     }
     draft = value; dirty = true;
-    status = "SmoothCam settings loaded into draft only. Review the full report, then Apply to activate.";
+    status = path.filename().string() + " loaded into draft. Apply to activate, or Apply and save to keep it.";
+    spdlog::info("SmoothCam import accepted: {} (draft only), preset_geometry={} base={} zoom_scale={}",
+        path.string(), value.third.preset_geometry, value.third.min_distance, value.third.zoom_scale);
     return true;
 }
 inline void RefreshPresets(const std::filesystem::path& plugins = plugins_folder) {
@@ -462,6 +475,9 @@ inline void __stdcall Presets() {
     }
     if (!import_report.empty()) {
         ImGuiMCP::Separator();
+        Wrapped(status);
+        if (dirty && ImGuiMCP::Button("Apply draft and save")) { Submit(true); return; }
+        Help("Applies all current draft settings and saves them. Import alone only prepares the draft.");
         if (ImGuiMCP::Button(show_import_report ? "Hide full compatibility report" : "Show full compatibility report"))
             show_import_report = !show_import_report;
         if (show_import_report) Wrapped(import_report);

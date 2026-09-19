@@ -119,7 +119,7 @@ impl<'de> Deserialize<'de> for UniqueValue {
 
 const MAPPED: &str = "Supported (approximate behavior)";
 const STORED: &str = "Unsupported state: preserved, unavailable in the current bridge";
-const INACTIVE: &str = "Supported parameter, inactive; value not retained separately";
+const INACTIVE: &str = "Inactive override; global settings used, local value not retained";
 const UNSUPPORTED: &str = "Unsupported: not applied";
 
 fn path(parent: &str, key: &str) -> String {
@@ -509,8 +509,6 @@ fn unsupported(r: &mut Object<'_, '_>) -> Result<(), String> {
         ("stealthMeterYOffset", 250.0, -10000.0, 10000.0),
         ("maxArrowPredictionRange", 10000.0, 0.0, 1e8),
         ("customZOffset", 0.0, -1000.0, 1000.0),
-        ("minCameraFollowDistance", 80.0, 0.0, 10000.0),
-        ("zoomMul", 500.0, 0.0, 10000.0),
         ("globalInterpDisableSmoothing", 2.0, 0.0, 60.0),
         ("globalInterpOverrideSmoothing", 1.5, 0.0, 60.0),
         ("localInterpOverrideSmoothing", 2.0, 0.0, 60.0),
@@ -589,6 +587,9 @@ fn parse_options(r: &mut Object<'_, '_>) -> Result<ThirdOptions, String> {
     let mut options = ThirdOptions {
         enabled: enabled as u32,
         group_mask: 127,
+        preset_geometry: 1,
+        min_distance: r.number("minCameraFollowDistance", 80.0, 0.0, 10_000.0)?,
+        zoom_scale: r.number("zoomMul", 500.0, 0.0, 10_000.0)?,
         offset_curve: r.curve("offsetScalar", 15)?,
         zoom_curve: r.curve("zoomScalar", 0)?,
         fov_curve: r.curve("fovScalar", 3)?,
@@ -669,8 +670,8 @@ pub fn import_smoothcam(text: &str, current: Config) -> Result<ImportResult, Str
     let mut report = Report::new(
         "SmoothCam import: approximate behavioral compatibility, not exact parity.\n\
          Supported: camera offsets, FOV, easing, follow settings, transitions, clamps and pitch zoom.\n\
-         Source bone/focus anchors differ: Colony uses its native anchor and compensates native shoulder offsets.\n\
-         World/local/vertical follow and clamping are approximations; source zoom scaling and interpolation-override transitions are unsupported.\n\
+         Imported geometry uses preset distance/zoom and world-vertical height. The host anchor follows Camera3rd or the head; native-relative Colony settings stay unchanged; custom follow-bone priorities are unsupported.\n\
+         World/local/vertical follow and clamping are approximations; zoom-scroll timing and interpolation-override transitions can differ.\n\
          Pitch direction and bowAim/sneaking stance selection can differ from the source camera.\n\
          Missing fields use public JSON construction defaults (not the reset-menu preset or previous Colony values).\n\
          Special states sitting, horseback, dragon, vampireLord, werewolf, userDefined and vanity are preserved but unavailable; only groups 0..6 run.\n\

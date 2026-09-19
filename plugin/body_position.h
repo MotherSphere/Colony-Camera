@@ -9,6 +9,14 @@
 #include <limits>
 
 namespace body_position {
+// Retained nodes may be detached when a skeleton provider replaces children.
+template<class Node>
+bool AttachedTo(const Node* node, const Node* root) {
+    for (unsigned depth = 0; node && depth < 64; ++depth, node = node->parent)
+        if (node == root) return true;
+    return false;
+}
+
 // Rendering can continue behind inventory without enabling gameplay controls.
 // Any other pause owner or blocking menu retains native fallback.
 constexpr bool RenderInventoryBody(bool firstPerson, bool inventoryOpen,

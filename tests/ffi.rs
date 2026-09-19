@@ -5,7 +5,7 @@ fn abi_layout_is_fixed_width_and_padding_free() {
     assert_eq!((size_of::<State>(), align_of::<State>()), (64, 4));
     assert_eq!((size_of::<Frame>(), align_of::<Frame>()), (40, 4));
     assert_eq!((size_of::<Profile>(), align_of::<Profile>()), (40, 4));
-    assert_eq!((size_of::<Config>(), align_of::<Config>()), (4664, 4));
+    assert_eq!((size_of::<Config>(), align_of::<Config>()), (4676, 4));
     assert_eq!(offset_of!(Config, third_person_enabled), 320);
     assert_eq!(
         (

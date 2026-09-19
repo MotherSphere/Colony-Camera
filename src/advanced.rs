@@ -99,6 +99,14 @@ pub struct ThirdOptions {
     pub pitch_max_angle: f32,
     pub pitch_zoom: f32,
     pub mirror_clamp: u32,
+    /// Imported presets define a boom distance and world-vertical height.
+    /// Missing fields preserve the native-relative geometry of older settings.
+    #[serde(default)]
+    pub preset_geometry: u32,
+    #[serde(default)]
+    pub min_distance: f32,
+    #[serde(default)]
+    pub zoom_scale: f32,
 }
 // Serde implements fixed arrays only through length 32. The sequence conversion
 // is confined to configuration I/O; the per-frame ABI never allocates.
@@ -138,6 +146,9 @@ impl Default for ThirdOptions {
             pitch_max_angle: 90.0,
             pitch_zoom: 0.0,
             mirror_clamp: 0,
+            preset_geometry: 0,
+            min_distance: 0.0,
+            zoom_scale: 0.0,
         }
     }
 }
@@ -151,9 +162,12 @@ impl ThirdOptions {
             self.pitch_enabled,
             self.pitch_after,
             self.mirror_clamp,
+            self.preset_geometry,
         ]
         .iter()
         .all(|x| *x <= 1)
+            && bounded(self.min_distance, 0.0, 10_000.0)
+            && bounded(self.zoom_scale, 0.0, 10_000.0)
             && self.group_mask & !0x3fff == 0
             && self.clamp_mask & !7 == 0
             && [
@@ -188,6 +202,8 @@ pub struct AdvancedFrame {
     pub native_side: f32,
     pub native_up: f32,
     pub shoulder_mirrored: u32,
+    /// Native target zoom minus fMinCurrentZoom, clamped at zero by the host.
+    pub zoom: f32,
 }
 impl AdvancedFrame {
     fn valid(&self) -> bool {
@@ -204,6 +220,7 @@ impl AdvancedFrame {
             && self.group < 14
             && self.stance < 4
             && self.shoulder_mirrored <= 1
+            && bounded(self.zoom, 0.0, 100.0)
             && bounded(self.pitch_degrees, -90.0, 90.0)
             && bounded(self.native_side, -10_000.0, 10_000.0)
             && bounded(self.native_up, -10_000.0, 10_000.0)
@@ -383,8 +400,19 @@ fn step_validated(
             -frame.native_up,
         ],
     );
-    let orbit_target =
-        std::array::from_fn(|i| frame.native.position[i] - frame.focus[i] + neutral_correction[i]);
+    let orbit_target = if o.preset_geometry == 1 {
+        rotate(
+            q,
+            [
+                0.0,
+                -o.min_distance - frame.zoom * o.zoom_scale
+                    + if o.pitch_after == 0 { pitch } else { 0.0 },
+                0.0,
+            ],
+        )
+    } else {
+        std::array::from_fn(|i| frame.native.position[i] - frame.focus[i] + neutral_correction[i])
+    };
     let mut target = p.offset;
     if frame.shoulder_mirrored == 1 {
         target[0] = -target[0];
@@ -447,7 +475,13 @@ fn step_validated(
     if o.pitch_after == 1 {
         offset[1] += pitch;
     }
-    let offset = rotate(q, offset);
+    let offset = if o.preset_geometry == 1 {
+        let mut world = rotate(q, [offset[0], offset[1], 0.0]);
+        world[2] += offset[2];
+        world
+    } else {
+        rotate(q, offset)
+    };
     let desired = std::array::from_fn(|i| frame.focus[i] + orbit_target[i] + offset[i]);
     state.position = std::array::from_fn(|i| state.anchor[i] + state.orbit[i] + offset[i]);
     let lag = subtract(state.position, desired);

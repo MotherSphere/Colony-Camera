@@ -57,8 +57,9 @@ changes camera behavior; it is not a switch to SmoothCam's original engine.
 - Twenty-two easing curves: linear and quadratic, cubic, quartic, quintic, sine,
   circular and exponential in/out/in-out variants.
 - Per-profile side, depth, height and FOV adjustments; separately timed offset,
-  depth and FOV transitions. Side/height replace native shoulder offsets; depth
-  remains additive to the native camera's zoom.
+  depth and FOV transitions. Native-relative settings retain native shoulder and
+  zoom semantics. Newly imported presets use their base distance and zoom scale,
+  with height applied on the world vertical axis.
 - Camera-local X/Y/Z lag bounds, optional mirrored X bounds when changing shoulder,
   and downward-pitch zoom before or after orbit interpolation. Disabling a movement
   group delegates that group to the preserved legacy profiles.
@@ -74,10 +75,21 @@ bindings and first-person settings, and changes only the draft. **Apply and save
 persists the conversion; exporting a `.ccpreset` preserves the resulting native
 Camera Colony configuration, not unsupported SmoothCam data.
 
+If you imported a preset with 0.3.0 or 0.3.1, import the original JSON again
+and choose **Apply draft and save** to use the corrected distance/height model.
+Older Colony settings retain their existing geometry until explicitly reimported.
+The model and its base distance/zoom scale are editable on **Third Person**.
+An inactive interpolation override means the preset uses global follow settings;
+it does not disable the camera.
+
 Expand the compatibility report to see mapped, approximate, inactive, unsupported
 and unknown fields. Pathological reports stop at 1 MiB with an explicit truncation
-notice; the complete input is still validated. This independent world/orbit solver differs from SmoothCam's target-anchor,
-zoom and interpolation pipeline, so identical numeric values do not guarantee
+notice; the complete input is still validated. Imported presets use
+`minCameraFollowDistance` and `zoomMul` together with the native target zoom.
+The follow height comes from Camera3rd, falling back to the humanoid head.
+Custom follow-bone priorities and exact zoom-scroll timing are not reproduced.
+This independent world/orbit solver differs from SmoothCam's interpolation
+pipeline, so identical numeric values do not guarantee
 identical movement. Sitting, horseback, dragon, transformed and vanity group data
 can be retained in the configuration, but those camera states remain native.
 Crosshair rendering, projectile aiming correction, ballistic prediction, trajectory
