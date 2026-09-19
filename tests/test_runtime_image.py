@@ -10,7 +10,16 @@ spec = importlib.util.spec_from_file_location("verify_runtime", Path(__file__).r
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
-def image(version=(1, 6, 1170, 0)):
+def version_block(key, value=b"", children=b""):
+    block=bytearray(struct.pack("<HHH",0,len(value)//2,1)+f"{key}\0".encode("utf-16le"))
+    block.extend(bytes(-len(block)%4)); block.extend(value)
+    if children:
+        block.extend(bytes(-len(block)%4)); block.extend(children)
+    struct.pack_into("<H",block,0,len(block))
+    return bytes(block)
+
+
+def image(version=(1, 6, 1170, 0), product=None):
     data = bytearray(0x600)
     data[:2] = b"MZ"
     struct.pack_into("<I", data, 60, 0x80)
@@ -34,6 +43,11 @@ def image(version=(1, 6, 1170, 0)):
     value[6:6+len(key)] = key
     struct.pack_into("<IIII", value, value_off, 0xFEEF04BD, 0x10000,
                      version[0]<<16|version[1], version[2]<<16|version[3])
+    product = ".".join(map(str,version)) if product is None else product
+    strings=version_block("StringFileInfo",children=version_block("040904b0",children=
+        version_block("ProductVersion",f"{product}\0".encode("utf-16le"))))
+    value.extend(bytes(-len(value)%4)); value.extend(strings)
+    struct.pack_into("<H",value,0,len(value))
     struct.pack_into("<IIII", data, 0x260, 0x1100, len(value), 0, 0)
     data[0x300:0x300+len(value)] = value
     return bytes(data)
@@ -103,6 +117,28 @@ class RuntimeImageTests(unittest.TestCase):
         self.assertEqual(module.runtime_ids((1,5,97,0))["bodySceneUpdate"], 39446)
         with self.assertRaises(ValueError): module.runtime_ids((1,6,659,0))
         with self.assertRaises(ValueError): module.runtime_ids((1,7,105,0))
+
+    def test_uses_product_string_when_fixed_version_is_generic(self):
+        # Real Steam 1.5.97 uses fixed 1.0.0.0; CommonLib reads ProductVersion.
+        _,_,version=module.read_image(image((1,0,0,0),product="1.5.97.0"))
+        self.assertEqual(version,(1,5,97,0))
+
+    def test_rejects_missing_or_invalid_product_version(self):
+        for product in ("", "1.5.97", "1.5.97.0junk", "1.5.65536.0"):
+            with self.subTest(product=product), self.assertRaises(ValueError):
+                module.read_image(image(product=product))
+        data=image().replace("ProductVersion".encode("utf-16le"),"UnknownVersion".encode("utf-16le"))
+        with self.assertRaises(ValueError): module.read_image(data)
+
+    def test_rejects_malformed_version_children(self):
+        original=image()
+        for key in ("StringFileInfo", "040904b0", "ProductVersion"):
+            start=original.index(f"{key}\0".encode("utf-16le"))-6
+            for field,value in ((0,0),(0,65535),(2,65535),(4,2)):
+                with self.subTest(key=key,field=field,value=value):
+                    data=bytearray(original)
+                    struct.pack_into("<H",data,start+field,value)
+                    with self.assertRaises(ValueError): module.read_image(bytes(data))
 
     def test_reads_each_target_file_version(self):
         for version in [(1,7,104,0),(1,6,1170,0),(1,6,640,0),(1,5,97,0)]:

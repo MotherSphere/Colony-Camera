@@ -71,9 +71,44 @@ def read_image(data):
             length, value_length, kind = struct.unpack_from("<HHH", block)
             require(fixed+52 <= length <= len(block) and value_length == 52 and kind == 0
                     and block[6:6+len(key)] == key, "Invalid version info")
-            signature, structure, ms, ls = struct.unpack_from("<4I", block, fixed)
+            signature, structure = struct.unpack_from("<2I", block, fixed)
             require((signature, structure) == (0xfeef04bd, 0x10000), "Invalid fixed version signature")
-            versions.add((ms >> 16, ms & 0xffff, ls >> 16, ls & 0xffff))
+
+            def child(start, end, wanted):
+                matches = []
+                at = (start+3) & ~3
+                while at < end:
+                    require(at+6 <= end, "Truncated version child")
+                    size, count, kind = struct.unpack_from("<HHH", block, at)
+                    limit = at+size
+                    require(size >= 8 and limit <= end, "Invalid version child size")
+                    key_end = at+6
+                    while key_end+2 <= limit and block[key_end:key_end+2] != b"\0\0":
+                        key_end += 2
+                    require(key_end+2 <= limit, "Unterminated version key")
+                    name = block[at+6:key_end].decode("utf-16le")
+                    value = (key_end+2+3) & ~3
+                    value_end = value+count*(2 if kind == 1 else 1)
+                    require(kind in (0,1) and value_end <= limit, "Invalid version child value")
+                    if name.casefold() == wanted.casefold():
+                        matches.append((value,value_end,limit,kind))
+                    at = (limit+3) & ~3
+                require(len(matches) == 1, f"Missing or ambiguous {wanted}")
+                return matches[0]
+
+            # Match CommonLib's version source. Steam 1.5.97 has fixed 1.0.0.0.
+            begin, end, limit, _ = child(fixed+52,length,"StringFileInfo")
+            require(begin == end, "Unexpected StringFileInfo value")
+            begin, end, limit, _ = child(end,limit,"040904B0")
+            require(begin == end, "Unexpected string table value")
+            begin, end, _, kind = child(end,limit,"ProductVersion")
+            require(kind == 1, "ProductVersion is not a string")
+            product = block[begin:end].decode("utf-16le")
+            require(re.fullmatch(r"[0-9]{1,5}(?:\.[0-9]{1,5}){3}\x00", product),
+                    "Invalid ProductVersion string")
+            version = tuple(map(int,product[:-1].split(".")))
+            require(all(part <= 65535 for part in version), "ProductVersion component overflow")
+            versions.add(version)
     require(len(versions) == 1, "Missing or conflicting executable versions")
     return base, read, versions.pop()
 

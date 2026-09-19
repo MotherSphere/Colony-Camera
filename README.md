@@ -322,7 +322,11 @@ python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins
 ```
 
 For multi-runtime investigation, the read-only inspector accepts Address Library
-formats 1, 2 and 5 and checks the executable's version resource against the database:
+formats 1, 2 and 5 and checks the executable's ProductVersion string against the
+database, matching CommonLib. The fixed version fields in Steam 1.5.97 are 1.0.0.0
+and do not identify the runtime. Steam-wrapped executables contain encrypted code;
+inspect an unpacked analysis copy, keeping the original download and installed
+game unchanged. Keep game binaries outside this repository and release archives.
 
 ```powershell
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<matching-address-library.bin>" --inspect > runtime-inspection.json
