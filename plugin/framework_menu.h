@@ -123,7 +123,7 @@ inline void Submit(bool save) {
     });
 }
 inline bool Begin() {
-    ImGuiMCP::TextUnformatted("Camera Colony 0.3.2");
+    ImGuiMCP::TextUnformatted("Camera Colony 0.3.3");
     ImGuiMCP::SameLine();
     ImGuiMCP::TextUnformatted(busy ? "  Applying..." : dirty ? "  Draft modified" : "  Draft matches active settings");
     if (busy) return false;

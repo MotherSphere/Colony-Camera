@@ -33,6 +33,7 @@ RE::BSTSmartPointer<RE::ThirdPersonState> appliedTo;
 RE::TESObjectCELL* lastCell = nullptr;
 Clock::time_point lastTick{};
 RE::Setting* shoulderSettings[2]{};
+RE::Setting* minimumZoomSetting = nullptr;
 using UpdateFn = void (*)(RE::ThirdPersonState*, RE::BSTSmartPointer<RE::TESCameraState>&);
 using BeginFn = void (*)(RE::ThirdPersonState*);
 REL::Relocation<UpdateFn> originalUpdate;
@@ -405,7 +406,7 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.3.2 advanced-camera candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.3.3 advanced-camera candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
             sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
@@ -517,7 +518,6 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     const auto q = self->rotation;
     const float nativeFov = camera->GetRuntimeData2().worldFOV;
     CameraFrame frame{{native.x, native.y, native.z}, {q.w, q.x, q.y, q.z}, dt, reset ? 1u : 0u, nativeFov};
-    stamp = probe.Mark();
     CameraState candidate{};
     AdvancedState advancedCandidate{};
     bool advanced = false;
@@ -541,10 +541,8 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
                 state = {}; advancedState = {}; return;
             }
             focus.z = focusNode->world.translate.z;
-            float minimumZoom = 0.2f;
-            if (auto* settings = RE::INISettingCollection::GetSingleton()) {
-                if (auto* value = settings->GetSetting("fMinCurrentZoom:Camera")) minimumZoom = value->GetFloat();
-            }
+            // Resolve the setting once at DataLoaded, but read its live value.
+            const float minimumZoom = minimumZoomSetting ? minimumZoomSetting->GetFloat() : 0.2f;
             if (!std::isfinite(minimumZoom) || !std::isfinite(self->targetZoomOffset)) {
                 state = {}; advancedState = {}; return;
             }
@@ -560,7 +558,9 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         if (!reportedFrame) spdlog::info("Advanced geometry: preset={} group={} stance={} focus=({:.2f},{:.2f},{:.2f}) zoom={:.3f} base={:.2f} scale={:.2f}",
             config.third.preset_geometry, group, stance, focus.x, focus.y, focus.z,
             presetZoom, config.third.min_distance, config.third.zoom_scale);
+        stamp = probe.Mark();
         const auto result = cc_step_advanced(&advancedState, &input, &config.third, &advancedCandidate);
+        probe.result.math = probe.Elapsed(stamp);
         if (result) { state = {}; advancedState = {}; return; }
         advanced = advancedCandidate.initialized != 0;
         if (advanced) {
@@ -574,9 +574,10 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     if (!advanced) {
         frame.reset |= advancedState.initialized;
         advancedState = {};
+        stamp = probe.Mark();
         candidate = cc_step(state, frame, profile);
+        probe.result.math = probe.Elapsed(stamp);
     }
-    probe.result.math = probe.Elapsed(stamp);
     if (!candidate.initialized) { state = {}; advancedState = {}; return; }
     RE::NiPoint3 position{candidate.position[0], candidate.position[1], candidate.position[2]};
     // Native collision is deliberately last. Never interpolate away from its correction.
@@ -941,8 +942,10 @@ void Message(SKSE::MessagingInterface::Message* message) {
         if (settings) {
             shoulderSettings[0] = settings->GetSetting("fOverShoulderPosX:Camera");
             shoulderSettings[1] = settings->GetSetting("fOverShoulderCombatPosX:Camera");
+            minimumZoomSetting = settings->GetSetting("fMinCurrentZoom:Camera");
         }
         for (auto& s : shoulderSettings) if (s && s->GetType() != RE::Setting::Type::kFloat) s = nullptr;
+        if (minimumZoomSetting && minimumZoomSetting->GetType() != RE::Setting::Type::kFloat) minimumZoomSetting = nullptr;
         if (!shoulderSettings[0] || !shoulderSettings[1]) spdlog::warn("Shoulder mirroring unavailable: native settings missing");
         if (auto* manager = RE::BSInputDeviceManager::GetSingleton()) manager->AddEventSink(&input);
         if (auto* ui = RE::UI::GetSingleton()) ui->AddEventSink<RE::MenuOpenCloseEvent>(&previewMenuEvents);
@@ -961,7 +964,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,3,2,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,3,3,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -976,7 +979,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.3.2 advanced-camera candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.3.3 advanced-camera candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};
