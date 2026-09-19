@@ -1,11 +1,12 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.10 adds optional SKSE Menu Framework settings**.
-It adapts Improved Camera's ordinary no-headbob placement and keeps the native
-first-person root visible while masking unused arm bones. Third-person smoothing
-and the corrected runtime weapon-state access remain in place. Visual validation
-is pending; this is not a complete SmoothCam or Improved Camera replacement.
+CommonLibSSE-NG bridge. **0.3.0 adds advanced third-person following and SmoothCam
+JSON preset conversion**, alongside the optional SKSE Menu Framework interface.
+The first-person placement, native weapon visibility and inventory rendering gate
+from 0.2.8–0.2.10 are retained. Those behaviors were confirmed in the tester's
+setup; new advanced camera behavior still requires in-game validation.
+This is not a complete SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
@@ -16,22 +17,68 @@ remain the published historical release; its tag and binary are unchanged.
 Install SKSE Menu Framework separately through your mod manager. Version 3.18 is
 the integration target. Open its Mod Control Panel (F1 in the inspected default
 configuration), then choose **Camera Colony**. Pages: General, Third Person,
-First Person, Profiles and Presets. Ctrl+F7 retains the native settings menu and
+Following, Offsets, Aiming, First Person, Legacy Profiles and Presets. Ctrl+F7 retains the native settings menu and
 its diagnostics; the plugin also works without the framework.
 
 Sliders edit a shared draft across pages. **Apply** changes the running settings;
 **Apply and save** also writes ColonyCamera.ini with the existing backup policy.
 **Discard edits** returns to the latest applied configuration. Defaults, saved INI
 and preset imports load into the draft first. Imports retain keyboard bindings.
-Preset export writes User.ccpreset, with the previous version kept as .bak.
-All seven profiles and existing offset, smoothing, zoom, FOV and body controls
-use the same Rust validation as the native menu. Duplicate bindings are rejected.
+Presets can be exported under a chosen filename, with the previous version kept
+as .bak. All controls use Rust validation; duplicate bindings and invalid ranges
+are rejected before application. Legacy Profiles remain available when advanced
+following is disabled.
 
 Render callbacks never modify camera state directly. Application is queued on the
 game thread; blocking framework windows suspend camera effects and hotkeys.
 The API header is pinned and supplied with its LGPL license. The framework DLL
 is not bundled. Native and Wine checks do not establish in-game visual compatibility;
 verify navigation, Apply/save/reload and menu transitions in Skyrim.
+
+## Advanced third person and SmoothCam presets
+
+Enable **Advanced following** in the framework settings, or import a SmoothCam
+JSON file in **Presets**, inspect the conversion report and choose **Apply**.
+Existing INIs keep the legacy camera until you opt in. Enabling advanced following
+changes camera behavior; it is not a switch to SmoothCam's original engine.
+
+- Standing, walking, running, sprinting, sneaking, swimming and bow-aim groups,
+  each with neutral, melee, ranged and magic variants.
+- Independent world following, orbit following and vertical response. Minimum
+  and maximum response fractions (at 60 Hz) vary with distance; elapsed-time
+  conversion avoids tying response directly to frame rate. Zero response holds,
+  one snaps, and disabling a filter follows immediately.
+- Twenty-two easing curves: linear and quadratic, cubic, quartic, quintic, sine,
+  circular and exponential in/out/in-out variants.
+- Per-profile side, depth, height and FOV adjustments; separately timed offset,
+  depth and FOV transitions. Side/height replace native shoulder offsets; depth
+  remains additive to the native camera's zoom.
+- Camera-local X/Y/Z lag bounds, optional mirrored X bounds when changing shoulder,
+  and downward-pitch zoom before or after orbit interpolation. Disabling a movement
+  group delegates that group to the preserved legacy profiles.
+- Native collision remains the final position constraint. Menu transitions,
+  teleports and perspective changes discard stale camera history.
+
+The importer reads a SmoothCam preset `{ "name": "...", "config": { ... } }`
+or a direct `SmoothCam.json` object. It discovers `SmoothCam.json` and
+`SmoothCamPreset*.json` under `Data/SKSE/Plugins`, plus JSON files in
+`Data/SKSE/Plugins/ColonyCamera/Presets` and `Data/SKSE/Plugins/SmoothCam/Presets`. Refresh the list after adding a file.
+Import reads the source without changing it, retains Camera Colony's keyboard
+bindings and first-person settings, and changes only the draft. **Apply and save**
+persists the conversion; exporting a `.ccpreset` preserves the resulting native
+Camera Colony configuration, not unsupported SmoothCam data.
+
+Expand the compatibility report to see mapped, approximate, inactive, unsupported
+and unknown fields. Pathological reports stop at 1 MiB with an explicit truncation
+notice; the complete input is still validated. This independent world/orbit solver differs from SmoothCam's target-anchor,
+zoom and interpolation pipeline, so identical numeric values do not guarantee
+identical movement. Sitting, horseback, dragon, transformed and vanity group data
+can be retained in the configuration, but those camera states remain native.
+Crosshair rendering, projectile aiming correction, ballistic prediction, trajectory
+arcs and alternative dialogue cameras are not implemented. Custom aiming offsets
+therefore require an accuracy check in game. No imported field silently enables
+those missing features. Malformed JSON, duplicate keys, invalid types/ranges and
+oversized files are rejected without partially changing settings.
 
 ## Candidate behavior and limits
 
@@ -164,7 +211,7 @@ weapons, shields, torches, spell effects and shadows still require testing.
 Configurable third-person arm policies, head-motion controls, independent hands FOV, near-plane adjustment and immersive
 furniture/mount/transformation/death/killmove handling are not implemented.
 There is no dynamic crosshair, projectile-origin reconciliation, ballistic
-prediction, trajectory display or third-party preset import mapping. Aiming
+prediction, trajectory display or alternative dialogue cameras. Legacy aiming
 defaults preserve the native camera; custom aiming displacement can reduce accuracy.
 
 ## Requirements and safe installation
@@ -225,7 +272,7 @@ temporary file, then replacing the INI while keeping its previous version as
 in the backup. Reload rejects malformed files and retains active settings.
 Closing the menu alone does not save changes. Shoulder choice is session-only.
 
-INI format 4 accepts formats 1, 2 and 3, preserving bindings and the existing
+INI format 5 accepts formats 1, 2, 3 and 4, preserving bindings and the existing
 first-person enabled state. Missing `[third_person] enabled` defaults to true.
 The third-person switch affects only that perspective; first person retains its
 own switch. Ctrl+F8 / General > Toggle effect remains the master switch for both.
@@ -258,7 +305,8 @@ camera is not moved; unused native arm bones are temporarily scaled, then restor
 | `fov_half_life` | World-FOV delta transition half-life, 0 to 1 second |
 | `active` | Enable an optional sprint/sneak/swim/airborne override |
 
-Half-lives use exponential interpolation; there are no other easing modes.
+Legacy half-lives use exponential interpolation. The advanced engine has its own
+curve and duration settings; the two engines are mutually exclusive.
 Nonzero FOV adjustments target 30-150 degrees, with smooth return to native FOV.
 Collision is applied after the requested third-person motion. Defaults use zero
 offsets, depth and FOV adjustments; the aiming profile also has zero lag.
@@ -311,7 +359,8 @@ cmake --build build-cross --parallel 2
 
 That toolchain defaults to `~/.local/share/xwin`; override `XWIN_ROOT` as needed.
 Its Windows test executables require Windows or a separate Wine test prefix.
-The 0.2.7 cross-build is not yet verified.
+Cross-compilation builds Windows executables; Wine tests use an isolated prefix.
+Neither compilation nor Wine substitutes for a Skyrim gameplay check.
 
 Validate entry bytes, Address Library mappings and camera RTTI against a
 legitimate local game installation:
@@ -320,22 +369,14 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
-The 0.2.7 regressions cover stable root/torso placement while eye/head offsets
-change, the reported off-center landmark, scaled and translated bodies, movement
-and turning, root separation limits, and the updated 64-byte alignment-frame ABI.
-Existing tests also cover heading continuity across vertical views and arm-state
-selection. Windows Application Control previously blocked canonical native test
-hosts before launch (Code Integrity event 3077); no alternate executable or
-security-policy change is used to circumvent that restriction.
-
-The full executable suite is **not green**. Runtime verification covers 14 entries,
-two camera RTTI tables and both guarded callsites. Prior revision passes do not
-validate this candidate. The tester confirmed weapon visibility in 0.2.5 and supplied
-0.2.6 diagnostics during the defect; **0.2.7 gameplay validation remains pending**.
+The checks cover the cross-language ABI, configuration migration and atomic
+persistence, camera ownership, first-person body placement, render transforms,
+advanced interpolation/transition behavior and strict preset conversion. Runtime
+verification covers 14 entries, two camera RTTI tables and both guarded callsites.
 Compilation and static export checks cannot verify rendering or compatibility.
 The existing whole-scene publication/restore mechanism is retained: replacing
 only node world transforms would omit native flattened-bone/skinning caches.
-Interactions with partial updates by other scene producers remain unverified.
+Interactions with partial updates by other scene producers require in-game checks.
 
 Before using a candidate broadly, check new/load game, repeated POV switching,
 walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transitions,
@@ -364,7 +405,9 @@ To build the supplied sources, extract `colony-camera.tar.gz`, then extract
 `dependencies.tar.gz` inside the resulting `Colony-Camera` folder. Skip dependency
 fetching because those source folders have no Git metadata, and run CMake directly.
 Packaging itself requires a Git checkout. The unused optional OpenVR submodule is
-not part of this SE/AE build. New Rust dependencies require source/notice bundling.
+not part of this SE/AE build. Also extract `rust-crates.tar.gz` into the same folder, including its hidden
+`.cargo/config.toml`; locked Rust crates then build offline from `vendor/`.
+Rust sources and their complete notices are bundled automatically.
 
 This tool creates local candidates; it does not install or publish them. An
 authorized binary publication must include the matching public source download

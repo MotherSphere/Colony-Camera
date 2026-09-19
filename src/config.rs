@@ -229,17 +229,12 @@ pub fn serialize_config(config: &Config) -> Result<String, String> {
         return Err("invalid configuration".into());
     }
     let mut text = String::with_capacity(2048);
-    writeln!(text, "[general]\nformat_version=5\nenabled={}\ntoggle_key={}\nshoulder_key={}\nreload_key={}\nmenu_key={}\n\n[third_person]\nenabled={}\n\n[first_person]\nenabled={}\nalignment_enabled={}\nbody_backset={}\nbody_side={}\n",
+    writeln!(text, "[general]\nformat_version=5\nenabled={}\ntoggle_key={}\nshoulder_key={}\nreload_key={}\nmenu_key={}\n\n[third_person]\nenabled={}\nadvanced={}\n\n[first_person]\nenabled={}\nalignment_enabled={}\nbody_backset={}\nbody_side={}\n",
         config.enabled != 0, config.keys[0], config.keys[1], config.keys[2], config.menu_key,
         config.third_person_enabled != 0,
+        serde_json::to_string(&config.third).map_err(|_| "advanced serialization failed")?,
         config.first_person_enabled != 0, config.body_alignment.alignment_enabled != 0,
         config.body_alignment.body_backset, config.body_alignment.body_side).map_err(|_| "format failed")?;
-    writeln!(
-        text,
-        "[third_person]\nadvanced={}\n",
-        serde_json::to_string(&config.third).map_err(|_| "advanced serialization failed")?
-    )
-    .map_err(|_| "format failed")?;
     for (i, name) in SECTIONS.iter().enumerate() {
         let p = config.profiles[i];
         writeln!(text, "[{name}]").map_err(|_| "format failed")?;

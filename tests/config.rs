@@ -165,6 +165,7 @@ fn advanced_settings_roundtrip_and_legacy_stays_legacy() {
     c.third.profiles[9].offset = [31.125, -24.5, 7.25];
     c.third.pitch_zoom = 32.0;
     let encoded = serialize_config(&c).unwrap();
+    assert_eq!(encoded.matches("[third_person]").count(), 1);
     assert_eq!(parse_config(&encoded).unwrap(), c);
     assert_eq!(parse_config(&serialize_config(&old).unwrap()).unwrap(), old);
     let invalid = encoded.replace(
