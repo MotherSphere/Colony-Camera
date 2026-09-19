@@ -1,24 +1,26 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.3.0 adds advanced third-person following and SmoothCam
-JSON preset conversion**, alongside the optional SKSE Menu Framework interface.
-The first-person placement, native weapon visibility and inventory rendering gate
-from 0.2.8–0.2.10 are retained. Those behaviors were confirmed in the tester's
-setup; new advanced camera behavior still requires in-game validation.
+CommonLibSSE-NG bridge. Version **0.2.0** adds advanced third-person following,
+SmoothCam JSON preset conversion, optional first-person body visibility and a
+structured SKSE Menu Framework interface.
+
+This release consolidates the locally tested builds through 0.3.4 under the public
+0.2.0 version number, following the published 0.1.2 release. Camera behavior is
+unchanged from development build 0.3.4. Existing settings remain compatible.
 This is not a complete SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
-remain the published historical release; its tag and binary are unchanged.
+remain available unchanged.
 
 ## Graphical settings (optional)
 
-Version 0.3.1 groups controls into aligned label/value forms, compact tabs and
+The interface groups controls into aligned label/value forms, compact tabs and
 collapsible sections. Offsets separates per-profile Position from global Transitions
 and Advanced limits. Following separates Movement, Rotation/orbit and Vertical.
 Hover labels for help; Ctrl-click sliders for precise numeric entry. Camera math,
-settings ranges, presets and first-person behavior are unchanged by this UI update.
+settings ranges and contextual help are available without leaving the page.
 
 Install SKSE Menu Framework separately through your mod manager. Version 3.18 is
 the integration target. Open its Mod Control Panel (F1 in the inspected default
@@ -98,7 +100,7 @@ therefore require an accuracy check in game. No imported field silently enables
 those missing features. Malformed JSON, duplicate keys, invalid types/ranges and
 oversized files are rejected without partially changing settings.
 
-## Candidate behavior and limits
+## First-person behavior and limits
 
 - Time-based third-person following with bounded lag, native collision, shoulder
   switching and parent-aware camera publication. Position, camera-space offsets,
@@ -123,76 +125,25 @@ weapon states also retain the native rig. Head/third-person arm masking and equi
 are temporary, with restoration when the plugin still owns the changed values.
 Missing or replaced skeleton nodes cause a native fallback.
 
-User testing of 0.2.2 reports good stationary framing but body/view drift during
-looking and strafing. Its raw model eye was sampled before native camera spring
-and collision corrections. 0.2.3 instead uses the displayed NiCamera position
-and heading after both model and camera updates. Each pass restores prior owned
-output before resampling; new first-person transitions wait for a native view
-update. Inactive state-update callbacks cannot restore the other perspective's
-outputs. No third-person interpolation runs in first person.
+Body placement adapts Improved Camera's no-headbob landmark-distance calculation
+through the native body basis, using the final rendered camera position. Native
+weapon-state access preserves first-person arms from drawing through sheathing.
+Temporary head and arm masks are restored when the plugin still owns their values.
+Both native model and final camera updates publish the aligned body; removing one
+of these passes can reintroduce body/view drift.
 
-Alignment now anchors the locomotion root behind the displayed camera, with
-adjustable backset/lateral offset. Animated eye/head landmarks provide height and
-pose diagnostics only. A full transform pass with controller advancement disabled
-checks resulting world transforms, then returns temporary local values to native
-values. Body scale, world height, root rotation and native camera/FOV remain unchanged.
-User testing of 0.2.3 reports intermittent torso intrusion during camera turns;
-small movement-only steps appear unaffected. Startup was subsequently confirmed
-working. 0.2.4 fixes a demonstrated heading discontinuity: projected camera-forward
-reversed beyond approximately 90.057 degrees, moving the default body backset by
-24 units. Heading now consistently uses projected screen-right, with a forward
-fallback only when that projection degenerates. Continuity across vertical is
-verified mathematically for native views without roll; arbitrary rolling camera
-rigs have no equivalent guarantee. Native actor pitch is clamped, but the final
-view also adds the camera bone's orientation without another pitch clamp.
-The tester subsequently reported first-person framing fixed in 0.2.4, but an
-invisible drawn weapon with hands visible low/right. Disabling only the body
-experiment restored the weapon. A second test kept the experiment enabled but
-disabled alignment: the weapon remained invisible. Translation is therefore not
-necessary for the reported symptom; these comparisons still do not establish a
-specific attachment layout.
-Animated torso deformation, native body tilt, height, projection and mesh clipping
-remain separate; no body rotation is forced.
+Inventory handling preserves body placement where the native first-person view
+remains active. Preview menus such as Tween and Map suspend the experiment and
+restore native rendering. Equipment or skeleton replacement reacquires nodes.
+Ordinary body placement, weapon visibility, inventory opening and repeated
+perspective changes were tested in the user's setup. This does not establish
+compatibility with every animation, outfit or menu replacement.
 
-0.2.5 fixes a concrete runtime-access defect: inherited ActorState calls on the
-player used the compile-time base layout in this multi-runtime build. Weapon-state
-reads now use `AsActorState()`, as the coordinator already did. A false sheathed
-reading could hide the native rig while showing body hands, and 0.2.4 also hid all
-body weapon clones. The native aim fallback uses the same corrected accessor.
-The candidate preserves body weapon/shield/quiver clones and keeps the native rig
-available from the draw request through sheathing. The tester confirmed that
-weapons are visible in 0.2.5. Head masks remain;
-selected body upper arms still shrink to avoid duplicate native combat arms.
-
-The tester reported sideways body motion while sheathed, renewed by changing or
-unequipping an item in inventory. A confirmed defective 0.2.6 pose had equal view
-and body-root headings (-5.7 degrees), but an eye landmark at body-local
-(17.21, 28.07, 95.47). The previous algorithm could move the entire rig when this
-animated landmark moved, even with matching headings. In 0.2.7, horizontal
-placement depends on the restored native root instead. Changing finite eye/head
-positions cannot change the resulting root placement. This fixes that mathematical
-coupling; it does not establish which animation produced the reported pose or
-prove that every outfit now renders correctly.
-
-0.2.8 replaces the 0.2.7 root anchor with Improved Camera's no-headbob
-landmark-distance calculation, rotated through the native body basis. It masks
-unused native upper arms instead of culling the entire first-person root. Drawn
-weapons still select native arms. Start with First Person > Reset alignment
-(backset 8, side 0); saved settings are preserved until explicitly reset.
-0.2.9 keeps body rendering active behind inventory while the native camera stays
-in first person, including paused inventory. This avoids releasing the body pose
-on menu opening. Equipment changes still reacquire skeleton nodes; no frozen pose
-or timer is used. Other pause owners, blocking menus and camera changes retain
-native fallback. Gameplay controls remain disabled by the menu as usual.
-Magic, Tween and Map menus continue to suspend the body experiment.
-The opening transition still requires visual confirmation with Grid Inventory.
-
-This is a scoped port, not the complete Improved Camera renderer. Colony still
-uses its rendered-camera sample and existing model/camera publication hooks;
-headtracking, per-hand policies and special actions have not been ported. The
-existing world-pose ownership checks do not detect every possible child-bone
-writer. Test equipment changes, turning, menus and POV transitions in game before
-using this candidate as a replacement for a working setup.
+This is a scoped port, not the complete Improved Camera renderer. Headtracking,
+per-hand policies, independent hands FOV, near-plane adjustment and special-action
+support are not implemented. World-pose ownership checks do not detect every
+possible child-bone writer. Test equipment, menus and perspective transitions
+with your own setup.
 
 While the body experiment is enabled, `First-person motion window` log lines
 count applied, native-fallback, not-ready and rejected publications separately
@@ -206,23 +157,6 @@ native-arm policy, native root visibility/scale, equipped form IDs and native
 biped attachment visibility/scale with exact body-clone alias checks. A matching
 clone pointer is distinct from shared skin-bone dependencies, which these logs do
 not establish.
-
-Improved Camera's default profile is the functional target, including its default
-absence of head bob. This candidate does not yet match its per-hand arm selection, head visibility,
-camera/hands FOV, near-plane, scale/height adjustment or special-action policies.
-Successful transform read-back proves publication, not a 1:1 visual match.
-Reference inspection found camera-ownership cooperation between Improved Camera
-and SmoothCam, not a generic invisible-weapon patch. Improved Camera's default
-arm selection depends on equipment/actions rather than a look-up/down threshold;
-its pitch-dependent near clipping is a separate feature.
-Reference inspection found no ordinary real-first-person hook that forces body
-yaw or adds a missing body-animation tick. Native scene-update verification also
-shows both player models updating; this does not establish the reported yaw cause.
-
-A supplied crash report from 0.2.4 strongly fits an overflowing native culling
-scratch-buffer copy in the exact Skyrim executable. The report does not identify
-the producer of the excessive frustum count or establish which mod caused it.
-This candidate does not patch that engine function and is not a claimed crash fix.
 
 Alignment, collision, projectile origins, interiors, head/hair/helmet clipping,
 weapons, shields, torches, spell effects and shadows still require testing.
@@ -238,7 +172,7 @@ The only target is **Steam Skyrim 1.7.104.0**, **SKSE 2.3.1** and the matching
 Address Library. Other runtimes, GOG and VR are unsupported. Exact runtime and
 entry-point checks reject unexpected code before the affected hooks are installed.
 
-1. Close Skyrim and back up your installed DLL and INI. Install the candidate as
+1. Close Skyrim and back up your installed DLL and INI. Install the mod as
    a separate mod providing `SKSE/Plugins/ColonyCamera.dll` and `ColonyCamera.ini`.
    Keep your existing INI; merge new fields or use the settings menu.
 2. Disable SmoothCam before testing: detecting `SmoothCam.dll` prevents Camera
@@ -255,7 +189,7 @@ entry-point checks reject unexpected code before the affected hooks are installe
 TDM, SkyParkour, animation/skeleton changes, ENB, Community Shaders and body mods
 require separate compatibility tests. Hook chaining does not establish visual or
 behavioral compatibility. No mod-manager profile is changed automatically.
-To roll back, close Skyrim, disable the candidate and restore the backed-up DLL
+To roll back, close Skyrim, disable the mod and restore the backed-up DLL
 and INI. The plugin does not write camera settings into saves.
 
 ## Settings and controls
@@ -290,7 +224,7 @@ temporary file, then replacing the INI while keeping its previous version as
 in the backup. Reload rejects malformed files and retains active settings.
 Closing the menu alone does not save changes. Shoulder choice is session-only.
 
-INI format 5 accepts formats 1, 2, 3 and 4, preserving bindings and the existing
+INI format 6 accepts formats 1 through 5, preserving bindings and the existing
 first-person enabled state. Missing `[third_person] enabled` defaults to true.
 The third-person switch affects only that perspective; first person retains its
 own switch. Ctrl+F8 / General > Toggle effect remains the master switch for both.
@@ -401,7 +335,7 @@ walk/run/sprint, slopes/stairs/tight walls, aim/spells, menu/dialogue transition
 furniture/mounts/transformations/death, fast travel, toggle/reload and rollback.
 Confirm both ordinary visibility and restoration after disabling the body experiment.
 
-## Reproducible candidate packaging
+## Reproducible packaging
 
 Commit verified source changes first and use the same developer terminal:
 
@@ -440,12 +374,12 @@ own-time values. First-person model and final-view callbacks are reported in
 separate stages with their preceding chains; third-person samples cover the
 camera-state callback. These
 are callback samples, not complete-frame percentiles or comparable stage costs.
-Since 0.3.3, third-person `rust` times only the Rust call; earlier versions also
-included input preparation and native INI lookup. Compare `own` across those
-versions rather than attributing that instrumentation change to a Rust speedup.
+Third-person `rust` times only the Rust call. Development builds before 0.3.3
+also included input preparation and native INI lookup; those measurements are
+not directly comparable.
 The minimum-zoom setting is resolved once at data load and its live value is read
 per frame, avoiding repeated linear INI searches without freezing the setting.
-Since 0.3.4, `PERF_BODY` breaks first-person samples down into restoration,
+`PERF_BODY` breaks first-person samples down into restoration,
 preparation, named-node lookup, full body updates and native-arm updates. It also
 reports average update and native-arm lookup counts per sampled callback.
 Restoration/preparation include nested work: do not add these fields together.
@@ -456,7 +390,7 @@ or detached/missing nodes triggers a new lookup. Both body publication passes an
 all transform/ownership checks remain in place.
 The logs do not measure complete frame time, GPU body-render cost or unsampled
 worst-case spikes. Instrumentation overhead has not been calibrated.
-No fresh candidate FPS or compatibility benchmark is claimed. Compare native,
+No controlled FPS improvement or universal compatibility is claimed. Compare native,
 baseline and candidate using repeated matched routes, warmup and frame-time tails;
 measure first person and third person separately.
 

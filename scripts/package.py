@@ -436,22 +436,22 @@ def package(args, root=ROOT):
     if ini.read_bytes() != ini_before:
         raise PackageError("Default INI changed during packaging")
     source_link = f"{repository}/tree/{revision}"
-    readme = f"""Camera Colony {version} - local candidate
+    readme = f"""Camera Colony {version}
 
-Install SKSE/Plugins with your mod manager as a separate candidate mod.
+Install SKSE/Plugins with your mod manager as a separate mod.
 Close Skyrim first and back up the installed DLL and your existing INI.
 The bundled INI contains defaults: merge settings instead of overwriting yours.
-Disable the candidate and restore the backup to roll back. Do not modify saves.
+Disable the mod and restore the backup to roll back. Do not modify saves.
 
 Requirements, controls, implemented features and validation limits:
 {repository}/blob/{revision}/README.md
-This candidate is not evidence of in-game validation or a finished feature set.
+See the source README for tested behavior and remaining compatibility limits.
 
 Exact corresponding source commit: {revision}
 Source: {source_link}
 Complete project, native dependency and locked Rust crate sources: {name}-sources.zip
-These files are local candidates. Source links become available only after the
-commit and matching source download are published; this tool publishes nothing.
+Source links require the commit and matching source download to be published.
+The packaging tool itself does not publish files.
 
 Original code: GPL-3.0-or-later. Preserve the complete LICENSES.txt, including
 dependency credits, CommonLib additional permissions and Rust runtime notices.
