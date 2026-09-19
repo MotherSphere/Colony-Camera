@@ -107,7 +107,7 @@ int main() {
         const auto malformed = isolated.path / "malformed.ccpreset";
         Put(malformed, "[combat]\nx=NaN");
         Require(!settings::Read(malformed, destination) && Same(destination, second), "Invalid read partially modified active settings");
-        Put(malformed, std::string(65537, 'x'));
+        Put(malformed, std::string(512 * 1024 + 1, 'x'));
         Require(!settings::Read(malformed, destination) && Same(destination, second), "Oversized read modified active settings");
         Put(malformed, std::string(1, static_cast<char>(0xff)));
         Require(!settings::Read(malformed, destination) && Same(destination, second), "Invalid UTF-8 modified active settings");

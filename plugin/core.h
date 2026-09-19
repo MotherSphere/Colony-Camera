@@ -56,6 +56,8 @@ struct BodyAlignmentResult {
     float vertical_error; // camera Z minus eye landmark Z; diagnostics only
     std::uint32_t valid; // zero means native fallback, never apply a partial result
 };
+#include "advanced.h"
+
 struct CameraConfig {
     CameraProfile profiles[CC_PROFILE_COUNT];
     std::uint32_t keys[3]; // original Ctrl+F8/F9/F10 bindings
@@ -65,6 +67,7 @@ struct CameraConfig {
     std::uint32_t locomotion_profiles; // bit (1 << CameraProfileIndex), opt-in sections
     BodyAlignmentOptions body_alignment;
     std::uint32_t third_person_enabled; // independent gate; enabled remains the master
+    ThirdOptions third;
 };
 enum CameraOwner : std::uint32_t { CC_NATIVE, CC_THIRD_PERSON, CC_FIRST_PERSON };
 enum CameraFlags : std::uint32_t {
@@ -100,7 +103,7 @@ struct CameraDecision {
 };
 static_assert(std::is_standard_layout_v<CameraState> && std::is_trivially_copyable_v<CameraConfig>);
 static_assert(sizeof(CameraState) == 64 && sizeof(CameraFrame) == 40);
-static_assert(sizeof(CameraProfile) == 40 && sizeof(CameraConfig) == 324);
+static_assert(sizeof(CameraProfile) == 40 && sizeof(CameraConfig) == 4664);
 static_assert(sizeof(BodyAlignmentFrame) == 104 && sizeof(BodyAlignmentOptions) == 12 && sizeof(BodyAlignmentResult) == 20);
 static_assert(offsetof(BodyAlignmentFrame, eye) == 36 && offsetof(BodyAlignmentFrame, eye_available) == 48);
 static_assert(offsetof(BodyAlignmentFrame, body_root) == 52);
@@ -110,7 +113,7 @@ static_assert(alignof(CameraState) == 4 && alignof(CameraConfig) == 4);
 static_assert(offsetof(CameraState, base) == 28 && offsetof(CameraProfile, offset_half_life) == 20);
 static_assert(offsetof(CameraConfig, keys) == 280 && offsetof(CameraConfig, menu_key) == 296);
 static_assert(offsetof(CameraConfig, body_alignment) == 308 && alignof(BodyAlignmentFrame) == 4);
-static_assert(offsetof(CameraConfig, third_person_enabled) == 320 && offsetof(CameraContext, third_person_enabled) == 24);
+static_assert(offsetof(CameraConfig, third) == 324 && offsetof(CameraConfig, third_person_enabled) == 320 && offsetof(CameraContext, third_person_enabled) == 24);
 
 extern "C" CameraState cc_step(CameraState, CameraFrame, CameraProfile);
 extern "C" CameraDecision cc_coordinate(CameraCoordinator, CameraContext);
@@ -123,3 +126,6 @@ extern "C" std::uint32_t cc_validate_config(const CameraConfig*);
 extern "C" std::uint32_t cc_parse_config(const unsigned char*, std::size_t, CameraConfig*);
 // No trailing NUL. To query required bytes, pass nullptr,0 as output/capacity.
 extern "C" std::uint32_t cc_serialize_config(const CameraConfig*, unsigned char*, std::size_t, std::size_t*);
+// 0 accepted; 3 rejected with report; 4 report capacity query. No partial config writes.
+extern "C" std::uint32_t cc_import_smoothcam(const unsigned char*, std::size_t,
+    const CameraConfig*, CameraConfig*, unsigned char*, std::size_t, std::size_t*);

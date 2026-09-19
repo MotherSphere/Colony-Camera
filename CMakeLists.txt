@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(ColonyCamera VERSION 0.2.10 LANGUAGES CXX)
+project(ColonyCamera VERSION 0.3.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
@@ -24,7 +24,7 @@ set(RUST_LIB "${CC_RUST_TARGET_DIR}/x86_64-pc-windows-msvc/release/colony_camera
 add_custom_command(OUTPUT "${RUST_LIB}"
     COMMAND ${CMAKE_COMMAND} -E env "RUSTFLAGS=-Ctarget-feature=+crt-static" ${CARGO} build --locked --release --target x86_64-pc-windows-msvc --target-dir "${CC_RUST_TARGET_DIR}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    DEPENDS src/lib.rs src/config.rs src/coordinator.rs src/first_person.rs Cargo.toml Cargo.lock VERBATIM)
+    DEPENDS src/lib.rs src/config.rs src/coordinator.rs src/first_person.rs src/advanced.rs src/smoothcam_import.rs Cargo.toml Cargo.lock VERBATIM)
 add_custom_target(camera_rust DEPENDS "${RUST_LIB}")
 add_library(ColonyCamera SHARED plugin/main.cpp)
 add_dependencies(ColonyCamera camera_rust)

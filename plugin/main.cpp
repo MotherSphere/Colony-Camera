@@ -18,6 +18,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 CameraConfig config = cc_defaults();
 CameraState state{};
+AdvancedState advancedState{};
 std::atomic_uint commands{0};
 std::atomic_uint bindings[3]{66, 67, 68};
 std::atomic_uint menuBinding{65};
@@ -242,16 +243,9 @@ struct Probe {
 };
 
 void LoadConfig() {
-    std::ifstream file("Data/SKSE/Plugins/ColonyCamera.ini", std::ios::binary | std::ios::ate);
-    if (!file) { spdlog::warn("Configuration unavailable; retaining current settings"); return; }
-    const auto size = file.tellg();
-    if (size < 0 || size > 65536) { spdlog::error("Configuration too large or unreadable"); return; }
-    std::string text(static_cast<std::size_t>(size), '\0');
-    file.seekg(0);
-    if (!file.read(text.data(), size)) { spdlog::error("Configuration read failed"); return; }
     CameraConfig replacement{};
-    if (cc_parse_config(reinterpret_cast<const unsigned char*>(text.data()), text.size(), &replacement)) {
-        spdlog::error("Invalid configuration; retaining current settings (unknown/duplicate key, range or encoding)");
+    if (!settings::Read("Data/SKSE/Plugins/ColonyCamera.ini", replacement)) {
+        spdlog::error("Configuration unavailable or invalid; retaining current settings");
         return;
     }
     ApplyConfig(replacement);
@@ -264,6 +258,35 @@ bool NativeAim(RE::PlayerCharacter* player, RE::PlayerCamera* camera) {
     auto* item = player->GetEquippedObject(false);
     auto* weapon = item ? item->As<RE::TESObjectWEAP>() : nullptr;
     return weapon && (weapon->IsBow() || weapon->IsCrossbow());
+}
+
+// Group/stance selection is limited to the ordinary third-person state. The
+// coordinator keeps mounts, furniture, transformations and scripted cameras native.
+std::uint32_t ThirdStance(RE::PlayerCharacter* player) {
+    if (!player->AsActorState()->IsWeaponDrawn()) return 0;
+    bool ranged = false;
+    for (const bool left : {false, true}) {
+        auto* item = player->GetEquippedObject(left);
+        if (!item) continue;
+        if (item->Is(RE::FormType::Spell) || item->Is(RE::FormType::Scroll)) return 3;
+        auto* weapon = item->As<RE::TESObjectWEAP>();
+        ranged |= weapon && (weapon->IsBow() || weapon->IsCrossbow());
+    }
+    return ranged ? 2u : 1u;
+}
+std::uint32_t ThirdGroup(RE::PlayerCharacter* player, RE::PlayerCamera* camera, std::uint32_t stance) {
+    const auto* actor = player->AsActorState();
+    const auto attack = actor->GetAttackState();
+    const bool drawing = attack == RE::ATTACK_STATE_ENUM::kBowDraw || attack == RE::ATTACK_STATE_ENUM::kBowDrawn
+        || attack == RE::ATTACK_STATE_ENUM::kBowAttached || attack == RE::ATTACK_STATE_ENUM::kBowReleasing;
+    if (stance == 2 && (drawing || camera->GetRuntimeData2().bowZoomedIn)) return 6;
+    if (actor->IsSwimming()) return 5;
+    if (actor->IsSneaking()) return 4;
+    if (actor->IsSprinting()) return 3;
+    const auto& movement = actor->actorState1;
+    if (movement.movingForward || movement.movingBack || movement.movingLeft || movement.movingRight)
+        return actor->IsWalking() ? 1u : 2u;
+    return 0;
 }
 
 constexpr std::array previewMenus{
@@ -382,7 +405,7 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.10 body-placement candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.3.0 advanced-camera candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
             sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
@@ -400,7 +423,7 @@ void End(RE::ThirdPersonState* self) {
     RestoreNative(self);
     RestorePosition();
     RestoreFov(); coordinator = {};
-    state = {};
+    state = {}; advancedState = {};
     lastTick = {};
     originalEnd(self);
 }
@@ -408,7 +431,7 @@ void Begin(RE::ThirdPersonState* self) {
     RestoreNative(self);
     RestorePosition();
     RestoreFov(); bodyRenderer.Reset(); coordinator = {};
-    state = {};
+    state = {}; advancedState = {};
     lastCell = nullptr;
     lastTick = {};
     originalBegin(self);
@@ -432,14 +455,16 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     RestoreNative(self);
     RestorePosition(); RestoreFov();
     probe.result.scene = probe.Elapsed(restoreStamp);
-    if (resetRequested.load()) { state = {}; reportedFrame = false; reportedMovement = false; }
+    if (resetRequested.load()) { state = {}; advancedState = {}; reportedFrame = false; reportedMovement = false; }
     auto* player = RE::PlayerCharacter::GetSingleton();
     const auto before = Coordinate(self, self->IsInputEventHandlingEnabled());
     const bool eligible = before.owner == CC_THIRD_PERSON;
     const bool aim = eligible && before.profile == CC_AIM;
+    const bool advancedBefore = eligible && config.third.enabled
+        && (config.third.group_mask & (1u << ThirdGroup(player, camera, ThirdStance(player))));
     // Mirror native shoulder offsets only during this native update, restoring both values.
     float saved[2]{};
-    const bool mirror = eligible && !aim && leftShoulder && shoulderSettings[0] && shoulderSettings[1];
+    const bool mirror = eligible && !advancedBefore && !aim && leftShoulder && shoulderSettings[0] && shoulderSettings[1];
     if (mirror) {
         for (int i=0; i<2; ++i) { saved[i] = shoulderSettings[i]->data.f; shoulderSettings[i]->data.f = -saved[i]; }
     }
@@ -448,24 +473,27 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     probe.result.native = probe.Elapsed(stamp);
     if (mirror) for (int i=0; i<2; ++i) if (shoulderSettings[i]->data.f == -saved[i]) shoulderSettings[i]->data.f = saved[i];
     if (!eligible || camera->currentState.get() != self || (next && next.get() != self)) {
-        state = {}; lastTick = {}; return;
+        state = {}; advancedState = {}; lastTick = {}; return;
     }
     const auto after = Coordinate(self, self->IsInputEventHandlingEnabled());
-    if (after.owner != CC_THIRD_PERSON) { state = {}; lastTick = {}; return; }
+    if (after.owner != CC_THIRD_PERSON) { state = {}; advancedState = {}; lastTick = {}; return; }
     const auto now = Clock::now();
     const float dt = lastTick == Clock::time_point{} ? 0.0f : std::chrono::duration<float>(now-lastTick).count();
     lastTick = now;
     auto* cell = player->GetParentCell();
     const bool reset = resetRequested.exchange(false) || before.reset || after.reset || lastCell != cell;
     lastCell = cell;
+    const auto stance = config.third.enabled ? ThirdStance(player) : 0u;
+    const auto group = config.third.enabled ? ThirdGroup(player, camera, stance) : 0u;
+    const bool advancedSelected = config.third.enabled && (config.third.group_mask & (1u << group));
     auto profile = config.profiles[after.profile];
     if (leftShoulder && after.profile != CC_AIM) profile.offset[0] = -profile.offset[0];
-    if ((profile.half_life == 0.0f || profile.max_lag == 0.0f)
+    if (!advancedSelected && (profile.half_life == 0.0f || profile.max_lag == 0.0f)
         && profile.offset[0] == 0.0f && profile.offset[1] == 0.0f && profile.offset[2] == 0.0f
         && profile.zoom == 0.0f && profile.fov_offset == 0.0f
         && profile.offset_half_life == 0.0f && profile.zoom_half_life == 0.0f && profile.fov_half_life == 0.0f) {
         // Default aiming really is native: not even an extra collision query.
-        state = {}; return;
+        state = {}; advancedState = {}; return;
     }
     auto* root = camera->cameraRoot.get();
     auto* rendered = RenderedCamera(camera);
@@ -480,31 +508,63 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
             }
             warned = true;
         }
-        state = {}; return;
+        state = {}; advancedState = {}; return;
     }
     const auto native = self->translation;
     if (!std::isfinite(native.x) || !std::isfinite(native.y) || !std::isfinite(native.z)) {
-        state = {}; return;
+        state = {}; advancedState = {}; return;
     }
     const auto q = self->rotation;
     const float nativeFov = camera->GetRuntimeData2().worldFOV;
     CameraFrame frame{{native.x, native.y, native.z}, {q.w, q.x, q.y, q.z}, dt, reset ? 1u : 0u, nativeFov};
     stamp = probe.Mark();
-    auto candidate = cc_step(state, frame, profile);
+    CameraState candidate{};
+    AdvancedState advancedCandidate{};
+    bool advanced = false;
+    if (advancedSelected) {
+        const auto focus = player->GetPosition();
+        // Camera-local forward is +Y. Negative elevation is downward pitch;
+        // unlike actor pitch this includes free-look and other camera rotation.
+        const float norm = q.w*q.w + q.x*q.x + q.y*q.y + q.z*q.z;
+        const float pitch = norm > 0.0f
+            ? -std::asin(std::clamp(2.0f*(q.w*q.x + q.y*q.z)/norm, -1.0f, 1.0f))*57.2957795f : 0.0f;
+        AdvancedFrame input{frame, {focus.x, focus.y, focus.z}, group, stance, pitch,
+            self->posOffsetActual.x, self->posOffsetActual.z, leftShoulder ? 1u : 0u};
+        const auto result = cc_step_advanced(&advancedState, &input, &config.third, &advancedCandidate);
+        if (result) { state = {}; advancedState = {}; return; }
+        advanced = advancedCandidate.initialized != 0;
+        if (advanced) {
+            std::copy_n(advancedCandidate.position, 3, candidate.position);
+            std::copy_n(advancedCandidate.native, 3, candidate.native);
+            candidate.initialized = 1;
+            candidate.fov = advancedCandidate.fov;
+            candidate.fov_delta = advancedCandidate.fov_delta;
+        }
+    }
+    if (!advanced) {
+        frame.reset |= advancedState.initialized;
+        advancedState = {};
+        candidate = cc_step(state, frame, profile);
+    }
     probe.result.math = probe.Elapsed(stamp);
-    if (!candidate.initialized) { state = {}; return; }
+    if (!candidate.initialized) { state = {}; advancedState = {}; return; }
     RE::NiPoint3 position{candidate.position[0], candidate.position[1], candidate.position[2]};
     // Native collision is deliberately last. Never interpolate away from its correction.
     stamp = probe.Mark();
     camera->CheckCameraCollision(position, true);
     probe.result.collision = probe.Elapsed(stamp);
     if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
-        state = {}; return;
+        state = {}; advancedState = {}; return;
     }
-    candidate.base[0] += position.x - candidate.position[0];
-    candidate.base[1] += position.y - candidate.position[1];
-    candidate.base[2] += position.z - candidate.position[2];
-    candidate.position[0] = position.x; candidate.position[1] = position.y; candidate.position[2] = position.z;
+    const float corrected[]{position.x, position.y, position.z};
+    for (unsigned i = 0; i < 3; ++i) {
+        const float delta = corrected[i] - candidate.position[i];
+        if (advanced) {
+            advancedCandidate.orbit[i] += delta;
+            advancedCandidate.position[i] = corrected[i];
+        } else candidate.base[i] += delta;
+        candidate.position[i] = corrected[i];
+    }
     stamp = probe.Mark();
     auto nativeState = self->translation;
     auto local = root->local.translate;
@@ -514,7 +574,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
             renderPosition, position, root->parent ? &root->parent->world : nullptr)) {
         static bool warned = false;
         if (!warned) { spdlog::warn("Invalid camera parent transform or position; retaining native camera"); warned = true; }
-        state = {}; return;
+        state = {}; advancedState = {}; return;
     }
     // Commit only after every coordinate passed validation. Retain node lifetimes
     // and restore only values still owned by this plugin at the next boundary.
@@ -524,6 +584,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     self->translation = nativeState;
     positionRoot.reset(root); positionCamera.reset(rendered);
     state = candidate;
+    advancedState = advancedCandidate;
     ApplyFov(camera, rendered, nativeFov, candidate.fov);
     // Refresh the actual render camera's projection after changing its world position.
     static REL::Relocation<void (*)(RE::NiCamera*)> updateMatrix{RELOCATION_ID(69271, 70641)};
@@ -540,8 +601,8 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         spdlog::info("Camera scene: parent={} local=({},{},{}) world=({},{},{})",
             static_cast<const void*>(root->parent), root->local.translate.x, root->local.translate.y,
             root->local.translate.z, root->world.translate.x, root->world.translate.y, root->world.translate.z);
-        spdlog::info("Camera frame applied; native=({},{},{}) output=({},{},{}) half_life={} max_lag={}",
-            native.x, native.y, native.z, position.x, position.y, position.z, profile.half_life, profile.max_lag);
+        spdlog::info("Camera frame applied; engine={} native=({},{},{}) output=({},{},{}) half_life={} max_lag={}",
+            advanced ? "advanced" : "legacy", native.x, native.y, native.z, position.x, position.y, position.z, profile.half_life, profile.max_lag);
         reportedFrame = true;
     }
 }
@@ -550,7 +611,7 @@ void FirstBegin(RE::FirstPersonState* self) {
     lastBodyView = {};
     if (appliedTo) RestoreNative(appliedTo.get());
     RestorePosition();
-    bodyRenderer.Reset(); RestoreFov(); state = {}; coordinator = {}; lastTick = {};
+    bodyRenderer.Reset(); RestoreFov(); state = {}; advancedState = {}; coordinator = {}; lastTick = {};
     reportedBodyAlignment = false;
     reportedViewMotion = false;
     ResetFirstView();
@@ -870,7 +931,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,10,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,3,0,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -885,7 +946,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.10 body-placement candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.3.0 advanced-camera candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

@@ -49,14 +49,14 @@ fn canonical_settings_roundtrip_every_profile_and_opt_in_field() {
     assert_eq!(c.profiles[SPRINT as usize].offset_half_life, 0.1);
     assert_eq!(c.first_person_enabled, 1);
     let text = serialize_config(&c).unwrap();
-    assert!(text.contains("format_version=4"));
+    assert!(text.contains("format_version=5"));
     assert_eq!(parse_config(&text).unwrap(), c);
 }
 
 #[test]
 fn rejects_new_invalid_values_without_silently_accepting_typos() {
     for text in [
-        "[general]\nformat_version=5",
+        "[general]\nformat_version=6",
         "[general]\nmenu_key=66",
         "[sprint]\nactive=1",
         "[first_person]\nenabled=1",
@@ -96,7 +96,7 @@ fn body_alignment_options_roundtrip_and_reject_invalid_values() {
     assert_eq!(config.body_alignment.body_backset, 27.125);
     assert_eq!(config.body_alignment.body_side, -9.5);
     let text = colony_camera::serialize_config(&config).unwrap();
-    assert!(text.contains("format_version=4"));
+    assert!(text.contains("format_version=5"));
     assert_eq!(parse_config(&text).unwrap(), config);
     for value in [
         "alignment_enabled=1",
@@ -134,7 +134,7 @@ fn third_person_switch_roundtrips_independently_of_first_person_and_master() {
                     ..Config::default()
                 };
                 let text = serialize_config(&config).unwrap();
-                assert!(text.contains("format_version=4"));
+                assert!(text.contains("format_version=5"));
                 assert!(text.contains(&format!("[third_person]\nenabled={}", third_person != 0)));
                 assert_eq!(parse_config(&text).unwrap(), config);
             }
@@ -153,4 +153,24 @@ fn third_person_switch_roundtrips_independently_of_first_person_and_master() {
     };
     assert!(!invalid.valid());
     assert!(serialize_config(&invalid).is_err());
+}
+
+#[test]
+fn advanced_settings_roundtrip_and_legacy_stays_legacy() {
+    use colony_camera::{serialize_config, Config};
+    let old = parse_config("[general]\nformat_version=4\n[first_person]\nenabled=true").unwrap();
+    assert_eq!(old.third.enabled, 0);
+    let mut c = Config::default();
+    c.third.enabled = 1;
+    c.third.profiles[9].offset = [31.125, -24.5, 7.25];
+    c.third.pitch_zoom = 32.0;
+    let encoded = serialize_config(&c).unwrap();
+    assert_eq!(parse_config(&encoded).unwrap(), c);
+    assert_eq!(parse_config(&serialize_config(&old).unwrap()).unwrap(), old);
+    let invalid = encoded.replace(
+        &format!("\"pitch_curve\":{}", c.third.pitch_curve),
+        "\"pitch_curve\":999",
+    );
+    assert_ne!(invalid, encoded);
+    assert!(parse_config(&invalid).is_err());
 }

@@ -5,7 +5,7 @@ fn abi_layout_is_fixed_width_and_padding_free() {
     assert_eq!((size_of::<State>(), align_of::<State>()), (64, 4));
     assert_eq!((size_of::<Frame>(), align_of::<Frame>()), (40, 4));
     assert_eq!((size_of::<Profile>(), align_of::<Profile>()), (40, 4));
-    assert_eq!((size_of::<Config>(), align_of::<Config>()), (324, 4));
+    assert_eq!((size_of::<Config>(), align_of::<Config>()), (4664, 4));
     assert_eq!(offset_of!(Config, third_person_enabled), 320);
     assert_eq!(
         (
@@ -112,5 +112,123 @@ fn ffi_rejects_null_unaligned_overlap_overflow_and_bad_config_atomically() {
             3
         );
         assert_eq!(written, 987);
+    }
+}
+
+#[test]
+fn smoothcam_import_reports_capacity_and_rejection_without_partial_application() {
+    let source = br#"{"name":"ABI test","config":{"standing":{"sideOffset":25}}}"#;
+    let current = Config {
+        first_person_enabled: 1,
+        ..Config::default()
+    };
+    let mut output = current;
+    let mut written = 0;
+    unsafe {
+        assert_eq!(
+            cc_import_smoothcam(
+                source.as_ptr(),
+                source.len(),
+                &current,
+                &mut output,
+                std::ptr::null_mut(),
+                0,
+                &mut written
+            ),
+            4
+        );
+        assert!(written > 0);
+        assert_eq!(output, current);
+        let mut report = vec![0xa5; written + 16];
+        let required = written;
+        assert_eq!(
+            cc_import_smoothcam(
+                source.as_ptr(),
+                source.len(),
+                &current,
+                &mut output,
+                report.as_mut_ptr(),
+                required - 1,
+                &mut written
+            ),
+            4
+        );
+        assert!(report.iter().all(|v| *v == 0xa5));
+        assert_eq!(output, current);
+        assert_eq!(
+            cc_import_smoothcam(
+                source.as_ptr(),
+                source.len(),
+                &current,
+                &mut output,
+                report.as_mut_ptr(),
+                required,
+                &mut written
+            ),
+            0
+        );
+        assert_eq!(output.first_person_enabled, 1);
+        assert_eq!(output.keys, current.keys);
+        assert_eq!(output.third.profiles[0].offset[0], 25.0);
+        assert_eq!(output.third.enabled, 1);
+        assert!(report[required..].iter().all(|v| *v == 0xa5));
+        assert!(std::str::from_utf8(&report[..required]).is_ok());
+        let saved = output;
+        let bad = br#"{"config":{"standing":{"sideOffset":"twenty"}}}"#;
+        report.resize(16384, 0);
+        assert_eq!(
+            cc_import_smoothcam(
+                bad.as_ptr(),
+                bad.len(),
+                &current,
+                &mut output,
+                report.as_mut_ptr(),
+                report.len(),
+                &mut written
+            ),
+            3
+        );
+        assert_eq!(output, saved);
+        assert!(std::str::from_utf8(&report[..written])
+            .unwrap()
+            .contains("rejected"));
+        let ptr = &mut output as *mut Config;
+        assert_eq!(
+            cc_import_smoothcam(
+                source.as_ptr(),
+                source.len(),
+                ptr,
+                ptr,
+                report.as_mut_ptr(),
+                report.len(),
+                &mut written
+            ),
+            1
+        );
+        assert_eq!(
+            cc_import_smoothcam(
+                source.as_ptr(),
+                source.len(),
+                &current,
+                &mut output,
+                usize::MAX as *mut u8,
+                2,
+                &mut written
+            ),
+            1
+        );
+        assert_eq!(
+            cc_import_smoothcam(
+                source.as_ptr(),
+                MAX_CONFIG_BYTES + 1,
+                &current,
+                &mut output,
+                report.as_mut_ptr(),
+                report.len(),
+                &mut written
+            ),
+            1
+        );
+        assert_eq!(output, saved);
     }
 }

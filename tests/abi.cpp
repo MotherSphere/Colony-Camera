@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <vector>
 int main() {
     timing::Totals measured;
     measured.Add({1000, 800, 100, 20, 30, true});
@@ -97,17 +98,35 @@ int main() {
     assert(cc_validate_config(nullptr) == 1);
     std::size_t required = 0;
     assert(cc_serialize_config(&c, nullptr, 0, &required) == 4 && required > 0);
-    unsigned char serialized[4096]{};
-    assert(required < sizeof(serialized));
-    assert(cc_serialize_config(&c, serialized, sizeof(serialized), &required) == 0);
+    std::vector<unsigned char> serialized(required);
+    assert(cc_serialize_config(&c, serialized.data(), serialized.size(), &required) == 0);
     CameraConfig roundtrip{};
-    assert(cc_parse_config(serialized, required, &roundtrip) == 0);
+    assert(cc_parse_config(serialized.data(), required, &roundtrip) == 0);
     assert(std::memcmp(&c, &roundtrip, sizeof(c)) == 0);
     // Rejected pointer layouts must not touch memory across the ABI.
     alignas(CameraConfig) unsigned char unaligned[sizeof(CameraConfig) + 1]{};
-    assert(cc_parse_config(serialized, required, reinterpret_cast<CameraConfig*>(unaligned + 1)) == 1);
+    assert(cc_parse_config(serialized.data(), required, reinterpret_cast<CameraConfig*>(unaligned + 1)) == 1);
     assert(cc_parse_config(reinterpret_cast<const unsigned char*>(&c), sizeof(c), &c) == 1);
     assert(cc_serialize_config(&c, reinterpret_cast<unsigned char*>(&c), sizeof(c), &required) == 1);
+
+    // Check the pointer ABI with nonzero fields across its complete layout.
+    ThirdOptions options{};
+    assert(cc_advanced_defaults(&options) == 0);
+    options.enabled = 1;
+    options.profiles[10].offset[0] = 28;
+    options.profiles[10].fov = 8;
+    assert(cc_advanced_validate(&options) == 0);
+    AdvancedFrame advancedFrame{{{10, -100, 15}, {1,0,0,0}, .016f, 1, 75},
+        {0,0,0}, 2, 2, 0, 10, 15, 0};
+    AdvancedState initial{}, advanced{};
+    assert(cc_step_advanced(&initial, &advancedFrame, &options, &advanced) == 0);
+    assert(advanced.initialized == 1 && advanced.position[0] == 28 && advanced.position[2] == 0);
+    assert(advanced.fov == 83 && advanced.native[0] == 10);
+    assert(cc_step_advanced(&advanced, &advancedFrame, &options, &advanced) == 1);
+    options.profiles[10].world.curve = 99;
+    const auto intact = advanced;
+    assert(cc_step_advanced(&initial, &advancedFrame, &options, &advanced) == 3);
+    assert(std::memcmp(&intact, &advanced, sizeof(advanced)) == 0);
 
     CameraContext context{CC_THIRD_PERSON, CC_AVAILABLE | CC_CONTROLS | CC_WEAPON_DRAWN,
         1, 0, 0, 0, 1};

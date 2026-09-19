@@ -5,13 +5,14 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace settings {
 inline bool Read(const std::filesystem::path& path, CameraConfig& output) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) return false;
     const auto size = file.tellg();
-    if (size < 0 || size > 65536) return false;
+    if (size < 0 || size > 512 * 1024) return false;
     std::string bytes(static_cast<std::size_t>(size), '\0');
     file.seekg(0);
     return file.read(bytes.data(), size) && cc_parse_config(
@@ -21,8 +22,9 @@ inline bool Read(const std::filesystem::path& path, CameraConfig& output) {
 // Only called by an explicit menu save/export. Keep the previous file until the
 // complete replacement has been flushed; never truncate the user's live INI.
 inline bool Write(const std::filesystem::path& path, const CameraConfig& config) {
-    std::array<unsigned char, 16384> bytes{};
     std::size_t size = 0;
+    if (cc_serialize_config(&config, nullptr, 0, &size) != 4 || size > 512 * 1024) return false;
+    std::vector<unsigned char> bytes(size);
     if (cc_serialize_config(&config, bytes.data(), bytes.size(), &size)) return false;
     std::error_code error;
     std::filesystem::create_directories(path.parent_path(), error);

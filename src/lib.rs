@@ -1,4 +1,7 @@
-//! Independent deterministic camera math. Positions are world-space; rotations are w,x,y,z.
+pub mod advanced;
+pub mod smoothcam_import;
+pub use advanced::*;
+// Independent deterministic camera math. Positions are world-space; rotations are w,x,y,z.
 mod config;
 mod coordinator;
 mod first_person;

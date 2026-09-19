@@ -1,4 +1,5 @@
 //! Atomic configuration parsing, validation and canonical own-format persistence.
+use crate::advanced::ThirdOptions;
 use crate::{
     BodyAlignmentOptions, Profile, AIM, AIRBORNE, COMBAT, LOCOMOTION_MASK, PROFILE_COUNT, SNEAK,
     SPRINT, SWIM,
@@ -6,7 +7,7 @@ use crate::{
 use std::fmt::Write;
 use std::mem::{align_of, size_of};
 
-pub const MAX_CONFIG_BYTES: usize = 65536;
+pub const MAX_CONFIG_BYTES: usize = 512 * 1024;
 const SECTIONS: [&str; PROFILE_COUNT] = [
     "exploration",
     "combat",
@@ -27,6 +28,7 @@ pub struct Config {
     pub locomotion_profiles: u32,
     pub body_alignment: BodyAlignmentOptions,
     pub third_person_enabled: u32,
+    pub third: ThirdOptions,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -54,6 +56,7 @@ impl Default for Config {
             locomotion_profiles: 0,
             body_alignment: BodyAlignmentOptions::default(),
             third_person_enabled: 1,
+            third: ThirdOptions::default(),
         }
     }
 }
@@ -69,6 +72,7 @@ impl Config {
             && self.locomotion_profiles & !LOCOMOTION_MASK == 0
             && self.profiles.iter().all(|profile| profile.valid())
             && self.body_alignment.valid()
+            && self.third.valid()
             && keys.iter().all(|key| key_valid(*key))
             && keys
                 .iter()
@@ -87,7 +91,7 @@ fn boolean(value: &str) -> Result<u32, String> {
 /// in when present, unless `active=false`; legacy files never activate them.
 pub fn parse_config(text: &str) -> Result<Config, String> {
     if text.len() > MAX_CONFIG_BYTES {
-        return Err("configuration exceeds 65536 bytes".into());
+        return Err("configuration exceeds 512 KiB".into());
     }
     let mut config = Config::default();
     let mut section = "general";
@@ -123,7 +127,8 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
         if section == "general" {
             match key {
                 "format_version" => {
-                    if value != "1" && value != "2" && value != "3" && value != "4" {
+                    if value != "1" && value != "2" && value != "3" && value != "4" && value != "5"
+                    {
                         return Err("unsupported format_version".into());
                     }
                 }
@@ -145,6 +150,10 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
         } else if section == "third_person" {
             match key {
                 "enabled" => config.third_person_enabled = boolean(value)?,
+                "advanced" => {
+                    config.third = serde_json::from_str(value)
+                        .map_err(|e| format!("invalid advanced settings: {e}"))?
+                }
                 _ => return Err(format!("unknown third_person key: {key}")),
             }
         } else if section == "first_person" {
@@ -220,11 +229,17 @@ pub fn serialize_config(config: &Config) -> Result<String, String> {
         return Err("invalid configuration".into());
     }
     let mut text = String::with_capacity(2048);
-    writeln!(text, "[general]\nformat_version=4\nenabled={}\ntoggle_key={}\nshoulder_key={}\nreload_key={}\nmenu_key={}\n\n[third_person]\nenabled={}\n\n[first_person]\nenabled={}\nalignment_enabled={}\nbody_backset={}\nbody_side={}\n",
+    writeln!(text, "[general]\nformat_version=5\nenabled={}\ntoggle_key={}\nshoulder_key={}\nreload_key={}\nmenu_key={}\n\n[third_person]\nenabled={}\n\n[first_person]\nenabled={}\nalignment_enabled={}\nbody_backset={}\nbody_side={}\n",
         config.enabled != 0, config.keys[0], config.keys[1], config.keys[2], config.menu_key,
         config.third_person_enabled != 0,
         config.first_person_enabled != 0, config.body_alignment.alignment_enabled != 0,
         config.body_alignment.body_backset, config.body_alignment.body_side).map_err(|_| "format failed")?;
+    writeln!(
+        text,
+        "[third_person]\nadvanced={}\n",
+        serde_json::to_string(&config.third).map_err(|_| "advanced serialization failed")?
+    )
+    .map_err(|_| "format failed")?;
     for (i, name) in SECTIONS.iter().enumerate() {
         let p = config.profiles[i];
         writeln!(text, "[{name}]").map_err(|_| "format failed")?;
@@ -352,5 +367,84 @@ pub unsafe extern "C" fn cc_serialize_config(
             written.write(text.len());
         }
         0
+    })
+}
+
+/// Import is transactional: invalid input never changes `output`. Report size is
+/// queryable with a null/zero report buffer. All supplied regions must be disjoint.
+/// # Safety
+/// Pointers must identify live readable/writable regions of the stated sizes.
+#[no_mangle]
+pub unsafe extern "C" fn cc_import_smoothcam(
+    bytes: *const u8,
+    len: usize,
+    current: *const Config,
+    output: *mut Config,
+    report: *mut u8,
+    capacity: usize,
+    written: *mut usize,
+) -> u32 {
+    if bytes.is_null()
+        || len > MAX_CONFIG_BYTES
+        || !aligned(current)
+        || !aligned(output)
+        || !aligned(written)
+        || (report.is_null() && capacity != 0)
+    {
+        return 1;
+    }
+    let mut regions = Vec::new();
+    for (pointer, size) in [
+        (bytes as usize, len),
+        (current as usize, size_of::<Config>()),
+        (output as usize, size_of::<Config>()),
+        (written as usize, size_of::<usize>()),
+    ] {
+        let Some(area) = region(pointer, size) else {
+            return 1;
+        };
+        if regions.iter().any(|other| overlap(*other, area)) {
+            return 1;
+        }
+        regions.push(area);
+    }
+    if capacity != 0 {
+        let Some(area) = region(report as usize, capacity) else {
+            return 1;
+        };
+        if regions.iter().any(|other| overlap(*other, area)) {
+            return 1;
+        }
+    }
+    guarded(|| {
+        let current = unsafe { current.read() };
+        if !current.valid() {
+            return 3;
+        }
+        let Ok(text) = std::str::from_utf8(unsafe { std::slice::from_raw_parts(bytes, len) })
+        else {
+            return 2;
+        };
+        let (result, message) = match crate::smoothcam_import::import_smoothcam(text, current) {
+            Ok(imported) => (Some(imported.config), imported.report),
+            Err(error) => (None, format!("Import rejected: {error}")),
+        };
+        unsafe {
+            written.write(message.len());
+        }
+        if capacity < message.len() || report.is_null() {
+            return 4;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(message.as_ptr(), report, message.len());
+        }
+        if let Some(config) = result {
+            unsafe {
+                output.write(config);
+            }
+            0
+        } else {
+            3
+        }
     })
 }
