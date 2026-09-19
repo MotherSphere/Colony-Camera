@@ -32,3 +32,9 @@ includes its complete COPYRIGHT-library.html notice, preserved inside LICENSES.t
 Dependency checkouts are fetched at the exact revisions in dependencies.json.
 The separately downloadable source archive contains project source, build instructions and this manifest;
 the accompanying dependency archive supplies the referenced dependency sources.
+
+SKSE Menu Framework 3 API header: QTR-Modding, revision
+1dcb70179076aae4ab626f43c5baab2735ca5877, LGPL-2.1.
+https://github.com/QTR-Modding/SKSE-Menu-Framework-3-API
+The unmodified header and complete license are in third_party/skse-menu-framework.
+The framework DLL is optional, separately installed, and is not bundled.

@@ -1,7 +1,7 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. **0.2.9 is an experimental inventory-transition candidate**.
+CommonLibSSE-NG bridge. **0.2.10 adds optional SKSE Menu Framework settings**.
 It adapts Improved Camera's ordinary no-headbob placement and keeps the native
 first-person root visible while masking unused arm bones. Third-person smoothing
 and the corrected runtime weapon-state access remain in place. Visual validation
@@ -10,6 +10,28 @@ is pending; this is not a complete SmoothCam or Improved Camera replacement.
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
 remain the published historical release; its tag and binary are unchanged.
+
+## Graphical settings (optional)
+
+Install SKSE Menu Framework separately through your mod manager. Version 3.18 is
+the integration target. Open its Mod Control Panel (F1 in the inspected default
+configuration), then choose **Camera Colony**. Pages: General, Third Person,
+First Person, Profiles and Presets. Ctrl+F7 retains the native settings menu and
+its diagnostics; the plugin also works without the framework.
+
+Sliders edit a shared draft across pages. **Apply** changes the running settings;
+**Apply and save** also writes ColonyCamera.ini with the existing backup policy.
+**Discard edits** returns to the latest applied configuration. Defaults, saved INI
+and preset imports load into the draft first. Imports retain keyboard bindings.
+Preset export writes User.ccpreset, with the previous version kept as .bak.
+All seven profiles and existing offset, smoothing, zoom, FOV and body controls
+use the same Rust validation as the native menu. Duplicate bindings are rejected.
+
+Render callbacks never modify camera state directly. Application is queued on the
+game thread; blocking framework windows suspend camera effects and hotkeys.
+The API header is pinned and supplied with its LGPL license. The framework DLL
+is not bundled. Native and Wine checks do not establish in-game visual compatibility;
+verify navigation, Apply/save/reload and menu transitions in Skyrim.
 
 ## Candidate behavior and limits
 

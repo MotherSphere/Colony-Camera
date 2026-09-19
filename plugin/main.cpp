@@ -10,6 +10,7 @@
 #include "timing.h"
 #include "first_person.h"
 #include "settings_menu.h"
+#include "framework_menu.h"
 #include "hook_validation.h"
 #include <Windows.h>
 
@@ -201,6 +202,7 @@ void ApplyConfig(const CameraConfig& replacement) {
     if (appliedTo) RestoreNative(appliedTo.get());
     RestoreCamera(true);
     config = replacement;
+    framework_menu::Sync(config);
     for (int i = 0; i < 3; ++i) bindings[i].store(config.keys[i]);
     menuBinding = config.menu_key;
     resetRequested = true;
@@ -278,7 +280,7 @@ bool InventoryBodyVisible() {
     auto* camera = RE::PlayerCamera::GetSingleton();
     if (!ui || !camera || !camera->currentState) return false;
     const auto inventory = ui->GetMenu(RE::InventoryMenu::MENU_NAME);
-    const bool blocked = settingsMenu.IsOpen() || ui->IsMenuOpen("Dialogue Menu") ||
+    const bool blocked = framework_menu::Blocking() || settingsMenu.IsOpen() || ui->IsMenuOpen("Dialogue Menu") ||
         ui->IsMenuOpen("Loading Menu") || ui->IsMenuOpen("Console") ||
         ui->IsMenuOpen("Journal Menu") || ui->IsMenuOpen(RE::MagicMenu::MENU_NAME) ||
         ui->IsMenuOpen(RE::TweenMenu::MENU_NAME) || ui->IsMenuOpen(RE::MapMenu::MENU_NAME);
@@ -303,7 +305,7 @@ CameraDecision Coordinate(RE::TESCameraState* current, bool inputEnabled) {
     // This flag authorizes body rendering only; it does not change ControlMap.
     if (inventoryBody || (controls && controls->IsMovementControlsEnabled() && inputEnabled)) context.flags |= CC_CONTROLS;
     if (!inventoryBody && (!ui || ui->GameIsPaused() || ui->IsMenuOpen("Dialogue Menu") || ui->IsMenuOpen("Loading Menu")
-        || ui->IsMenuOpen("Console") || PreviewMenuOpen(ui) || settingsMenu.IsOpen())) context.flags |= CC_MENU;
+        || ui->IsMenuOpen("Console") || PreviewMenuOpen(ui) || settingsMenu.IsOpen() || framework_menu::Blocking())) context.flags |= CC_MENU;
     if (player && context.enabled && (context.camera_mode == CC_THIRD_PERSON || context.first_person_enabled)) {
         const auto* actor = player->AsActorState();
         if (actor->GetLifeState() != RE::ACTOR_LIFE_STATE::kAlive) context.flags |= CC_DEAD;
@@ -380,7 +382,7 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.9 body-placement candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.10 body-placement candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
             sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
@@ -727,7 +729,7 @@ public:
             if (key == 29) ctrlLeft = button->IsPressed();
             if (key == 157) ctrlRight = button->IsPressed();
             auto* ui = RE::UI::GetSingleton();
-            if (!(ctrlLeft || ctrlRight) || !button->IsDown() || !ui || ui->GameIsPaused() || ui->IsMenuOpen("Console")) continue;
+            if (!(ctrlLeft || ctrlRight) || !button->IsDown() || !ui || ui->GameIsPaused() || ui->IsMenuOpen("Console") || framework_menu::Blocking()) continue;
             unsigned action = 0;
             for (int i=0; i<3; ++i) if (key == bindings[i].load()) action |= 1u << i;
             if (key == menuBinding.load()) action |= 8;
@@ -843,6 +845,7 @@ void InstallHooks() {
 void Message(SKSE::MessagingInterface::Message* message) {
     if (message->type == SKSE::MessagingInterface::kPostLoadGame || message->type == SKSE::MessagingInterface::kNewGame) InstallHooks();
     if (message->type == SKSE::MessagingInterface::kDataLoaded) {
+        framework_menu::Register(config, ApplyConfig);
         auto* settings = RE::INISettingCollection::GetSingleton();
         if (settings) {
             shoulderSettings[0] = settings->GetSetting("fOverShoulderPosX:Camera");
@@ -867,7 +870,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,9,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,2,10,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -882,7 +885,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.9 body-placement candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.10 body-placement candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};
