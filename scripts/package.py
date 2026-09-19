@@ -17,6 +17,7 @@ import re
 import struct
 import subprocess
 import tarfile
+import tempfile
 import time
 import tomllib
 import uuid
@@ -71,9 +72,8 @@ def read_version(root):
     if not match or match[1] != version.split("-", 1)[0]:
         raise PackageError("CMake and Cargo versions disagree")
     packages = tomllib.loads((root / "Cargo.lock").read_text(encoding="utf-8"))["package"]
-    if len(packages) != 1 or packages[0].get("name") != package["name"]:
-        raise PackageError("New Rust dependencies require corresponding-source and notice bundling")
-    if packages[0].get("version") != version:
+    local = [p for p in packages if p.get("source") is None and p.get("name") == package["name"]]
+    if len(local) != 1 or local[0].get("version") != version:
         raise PackageError("Cargo.lock and Cargo.toml versions disagree")
     return version
 
@@ -172,6 +172,101 @@ def consolidate_notices(root, dependency_notices, rustc):
         combined.extend(data)
         combined.extend(b"\n")
     return bytes(combined)
+
+
+def rust_sources(root, cargo, staging, epoch):
+    """Vendor the frozen public registry graph, never user Cargo configuration.
+
+    Cargo must already have the locked crates cached. No network or credentials
+    are needed here; the subsequent build uses an isolated Cargo home and these
+    same verified sources. The caller owns the temporary staging directory.
+    """
+    lock = (root / "Cargo.lock").read_bytes()
+    metadata = json.loads(command(cargo, "metadata", "--frozen", "--format-version", "1", cwd=root))
+    packages = tomllib.loads(lock.decode())["package"]
+    registry = "registry+https://github.com/rust-lang/crates.io-index"
+    crates = {}
+    for package in packages:
+        if "source" not in package:
+            continue
+        if (package["source"] != registry
+                or not re.fullmatch(r"[0-9a-f]{64}", package.get("checksum", ""))):
+            raise PackageError("Rust dependencies must pin public crates.io sources and checksums")
+        crates[(package["name"], package["version"], package["source"])] = package
+    resolved = {}
+    for package in metadata["packages"]:
+        if package.get("source") is None:
+            if Path(package["manifest_path"]).resolve() != root / "Cargo.toml":
+                raise PackageError("Local Rust dependencies require corresponding-source bundling")
+        else:
+            resolved[(package["name"], package["version"], package["source"])] = package
+    if crates.keys() != resolved.keys():
+        raise PackageError("Cargo.lock and resolved Rust dependencies disagree")
+
+    vendor = staging / "vendor"
+    config = "[net]\noffline = true\n"
+    if crates:
+        mapping = tomllib.loads(command(cargo, "vendor", "--frozen", "--versioned-dirs", vendor, cwd=root).decode())
+        if mapping != {"source": {"crates-io": {"replace-with": "vendored-sources"},
+                                  "vendored-sources": {"directory": str(vendor)}}}:
+            raise PackageError("Unexpected Cargo vendor source mapping")
+        config += ('\n[source.crates-io]\nreplace-with = "vendored-sources"\n'
+                   '\n[source.vendored-sources]\ndirectory = "vendor"\n')
+        expected = {f"{p['name']}-{p['version']}" for p in crates.values()}
+        if {p.name for p in vendor.iterdir()} != expected:
+            raise PackageError("Vendored crates do not match Cargo.lock")
+    cargo_home = staging / "cargo-home"
+    cargo_home.mkdir()
+    (cargo_home / "config.toml").write_text(
+        config.replace('directory = "vendor"', f"directory = {json.dumps(vendor.as_posix())}"), encoding="utf-8")
+
+    buffer = io.BytesIO()
+    notices, inventory = {}, []
+    with tarfile.open(fileobj=buffer, mode="w") as bundle:
+        def add(name, data, executable=False):
+            safe_path(name)
+            entry = tarfile.TarInfo(name)
+            entry.size, entry.mtime = len(data), epoch
+            entry.mode = 0o755 if executable else 0o644
+            bundle.addfile(entry, io.BytesIO(data))
+
+        add(".cargo/config.toml", config.encode())
+        for key, package in sorted(crates.items()):
+            directory = vendor / f"{package['name']}-{package['version']}"
+            if directory.is_symlink() or not directory.is_dir():
+                raise PackageError("Unsafe vendored crate directory")
+            files = {}
+            for path in sorted(directory.rglob("*")):
+                if path.is_symlink() or not (path.is_dir() or path.is_file()):
+                    raise PackageError(f"Unsupported vendored crate entry: {path.name}")
+                if path.is_file():
+                    files[path.relative_to(directory).as_posix()] = path
+            checksum_path = files.get(".cargo-checksum.json")
+            if checksum_path is None:
+                raise PackageError(f"{directory.name}: missing Cargo checksum file")
+            checksum = json.loads(checksum_path.read_bytes())
+            if (checksum.get("package") != package["checksum"]
+                    or set(checksum["files"]) != files.keys() - {".cargo-checksum.json"}):
+                raise PackageError(f"{directory.name}: vendored checksum disagrees with Cargo.lock or files")
+            found_license = False
+            for relative, path in files.items():
+                data = path.read_bytes()
+                if relative != ".cargo-checksum.json" and hashlib.sha256(data).hexdigest() != checksum["files"][relative]:
+                    raise PackageError(f"{directory.name}: vendored file checksum mismatch: {relative}")
+                name = f"vendor/{directory.name}/{relative}"
+                add(name, data, bool(path.stat().st_mode & 0o111))
+                if is_notice(PurePosixPath(relative)):
+                    if not data.strip():
+                        raise PackageError(f"Empty crate notice: {name}")
+                    notices[name] = data
+                    found_license = True
+            if not found_license:
+                raise PackageError(f"{directory.name}: no license notices found")
+            inventory.append({k: package[k] for k in ("name", "version", "source", "checksum")}
+                             | {"license": resolved[key].get("license")})
+    if (root / "Cargo.lock").read_bytes() != lock:
+        raise PackageError("Cargo.lock changed during vendoring")
+    return buffer.getvalue(), notices, inventory, hashlib.sha256(lock).hexdigest()
 
 
 def build_cache(root, build_dir, config):
@@ -319,7 +414,6 @@ def package(args, root=ROOT):
         raise PackageError(f"Output already exists; preserve it before retrying: {output}")
     project_source = archive_source(root, revision, "Colony-Camera")
     dependency_source, dependency_notices, dependency_revisions = dependency_sources(root)
-    licenses = consolidate_notices(root, dependency_notices, args.rustc)
     ini = root / "assets/SKSE/Plugins/ColonyCamera.ini"
     ini_before = ini.read_bytes()
     environment = dict(os.environ, SOURCE_DATE_EPOCH=str(epoch), RUSTC=args.rustc)
@@ -328,7 +422,12 @@ def package(args, root=ROOT):
         raise PackageError("CMake cache does not identify the Cargo executable")
     # Rebuild from clean C++ outputs and an unused Rust target. Existing Cargo
     # directories are never deleted or supplied with fabricated cache markers.
-    build_commands = rebuild(root, build_dir, cache, args, environment)
+    with tempfile.TemporaryDirectory(prefix="colony-package-") as temporary:
+        staging = Path(temporary)
+        rust_source, rust_notices, rust_crates, lock_sha256 = rust_sources(root, cargo, staging, epoch)
+        licenses = consolidate_notices(root, dependency_notices | rust_notices, args.rustc)
+        environment.update(CARGO_HOME=str(staging / "cargo-home"), CARGO_NET_OFFLINE="true")
+        build_commands = rebuild(root, build_dir, cache, args, environment)
     binary = dll_path.read_bytes()
     validate_dll(binary, version)
     clean_revision(root, revision)
@@ -350,7 +449,7 @@ This candidate is not evidence of in-game validation or a finished feature set.
 
 Exact corresponding source commit: {revision}
 Source: {source_link}
-Complete project and native dependency sources: {name}-sources.zip
+Complete project, native dependency and locked Rust crate sources: {name}-sources.zip
 These files are local candidates. Source links become available only after the
 commit and matching source download are published; this tool publishes nothing.
 
@@ -365,6 +464,8 @@ Publish the matching source download alongside any authorized binary release.
         raise PackageError("Unexpected player archive contents")
     metadata = {"version": version, "revision": revision, "repository": repository,
                 "dependencies": dependency_revisions, "configuration": args.config,
+                "rust_crates": rust_crates, "cargo_lock_sha256": lock_sha256,
+                "cargo_source_config": ".cargo/config.toml (offline, bundled vendor directory)",
                 "rustc": command(args.rustc, "-Vv").decode().strip(),
                 "cargo": command(cargo, "--version").decode().strip(),
                 "cmake": command(args.cmake, "--version").decode().splitlines()[0],
@@ -376,15 +477,33 @@ Publish the matching source download alongside any authorized binary release.
                 "validation": "Clean build; x64 PE and SKSE exports; archive integrity. In-game validation pending."}
     source_readme = f"""Camera Colony {version} corresponding sources
 Commit: {revision}
-Extract colony-camera.tar.gz, then extract dependencies.tar.gz inside the
-resulting Colony-Camera directory. Follow README.md; skip fetch-dependencies.py
-because the supplied dependency sources have no Git metadata.
-build.json records the source revisions and toolchain used for this candidate.
+Extract colony-camera.tar.gz, then extract dependencies.tar.gz and
+rust-crates.tar.gz inside the resulting Colony-Camera directory. Preserve the
+hidden .cargo/config.toml: it maps crates.io to the supplied vendor directory
+and disables Cargo network access. Run all build commands from Colony-Camera.
+
+Install the toolchains recorded in build.json before going offline, including
+the Rust x86_64-pc-windows-msvc target, CMake and the Windows C++ SDK/compiler
+(or the documented Linux cross-build tools and xwin sysroot). Toolchains and
+SDKs are not bundled. Follow README.md's platform-specific CMake configure and
+build commands; skip fetch-dependencies.py and cargo fetch. Do not run the
+packaging script on extracted sources: it requires clean Git checkouts.
+Verify Cargo resolution with `cargo metadata --frozen --format-version 1`.
+Rust-only rebuild: `cargo build --frozen --release --target x86_64-pc-windows-msvc`
+with RUSTFLAGS=-Ctarget-feature=+crt-static (also set by the CMake build).
+
+build.json records exact revisions, crate versions/checksums, Cargo.lock SHA256
+and the toolchain used. Cargo verifies the vendored file checksums offline.
+The candidate build also uses these vendored sources with an isolated Cargo
+home. No registry cache, user Cargo configuration or credentials are bundled.
+ZIP metadata is deterministic for identical inputs; matching compiler/SDK
+versions are required and byte-identical DLL reproduction is not guaranteed.
 CommonLib's optional OpenVR submodule is unused by this SE/AE build and omitted.
 No SmoothCam or Improved Camera binary, assets or presets are supplied.
 """.encode()
     sources = {"colony-camera.tar.gz": gzip.compress(project_source, mtime=epoch),
                "dependencies.tar.gz": gzip.compress(dependency_source, mtime=epoch),
+               "rust-crates.tar.gz": gzip.compress(rust_source, mtime=epoch),
                "README.txt": source_readme, "LICENSES.txt": licenses,
                "build.json": (json.dumps(metadata, indent=2) + "\n").encode()}
     output.mkdir(parents=True, exist_ok=False)

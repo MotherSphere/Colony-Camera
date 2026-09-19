@@ -27,7 +27,18 @@ a scoped ordinary-first-person adaptation, not full Improved Camera parity.
 
 The package includes the upstream license files without replacing their credits.
 The Rust standard library is distributed under MIT OR Apache-2.0; the install package
-includes its complete COPYRIGHT-library.html notice, preserved inside LICENSES.txt. No new crates are needed by the Rust camera core.
+includes its complete COPYRIGHT-library.html notice, preserved inside LICENSES.txt.
+
+Rust serialization uses serde (with serde_derive) and serde_json. Their transitive
+dependencies are pinned in Cargo.lock. The release source download includes
+the exact locked crates in rust-crates.tar.gz, with Cargo checksum files and
+.cargo/config.toml for offline builds. The generated build.json lists every
+crate's version, registry checksum and declared license. LICENSES.txt preserves
+the full upstream license and notice files from each vendored crate, including
+the derive/procedural-macro dependencies; upstream credits are not replaced.
+Packaging uses Cargo's frozen metadata and vendor commands and requires the
+locked crates to be cached beforehand. It refuses missing notices, mismatched
+checksums and unsupported non-crates.io dependencies.
 
 Dependency checkouts are fetched at the exact revisions in dependencies.json.
 The separately downloadable source archive contains project source, build instructions and this manifest;

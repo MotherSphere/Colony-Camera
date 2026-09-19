@@ -5,11 +5,14 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 import tarfile
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -72,6 +75,7 @@ class PackageTests(unittest.TestCase):
         write(self.root / ".gitignore", "/build/\n/deps/\n/dist/\n")
         write(self.root / "Cargo.toml", '[package]\nname = "camera"\nversion = "1.2.3"\n')
         write(self.root / "Cargo.lock", 'version = 4\n[[package]]\nname = "camera"\nversion = "1.2.3"\n')
+        write(self.root / "src/lib.rs", "pub fn camera() {}\n")
         write(self.root / "CMakeLists.txt", "project(ColonyCamera VERSION 1.2.3 LANGUAGES CXX)\n")
         write(self.root / "third_party/skse-menu-framework/LICENSE", "Complete Menu Framework license fixture\n")
         write(self.root / "LICENSE", "Project complete license fixture\n")
@@ -95,6 +99,24 @@ class PackageTests(unittest.TestCase):
         write(self.sysroot / "share/doc/rust/COPYRIGHT-library.html", "<html>Complete Rust notice fixture</html>\n")
         self.args = argparse.Namespace(build_dir=self.build, config="Release", output=self.root / "dist",
                                        rustc="fixture-rustc", cmake="fixture-cmake", jobs=2)
+        self.crates = {}
+
+    def add_crate(self):
+        """Registry responses are fixtures; archive and checksum validation are real."""
+        self.crates = {"serde-1.0.229": {
+            "Cargo.toml": b'[package]\nname = "serde"\nversion = "1.0.229"\n',
+            "src/lib.rs": b"// exact locked crate source fixture\n",
+            "LICENSE-MIT": b"Complete upstream MIT license fixture\n",
+            "LICENSE-APACHE": b"Complete upstream Apache license fixture\n",
+        }}
+        self.checksum = "a" * 64
+        with (self.root / "Cargo.toml").open("a") as file:
+            file.write('\n[dependencies]\nserde = "1.0.229"\n')
+        with (self.root / "Cargo.lock").open("a") as file:
+            file.write('dependencies = ["serde"]\n\n[[package]]\nname = "serde"\n'
+                       'version = "1.0.229"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n'
+                       f'checksum = "{self.checksum}"\n')
+        self.revision = commit(self.root)
 
     def configure(self, generator):
         text = (f"CMAKE_HOME_DIRECTORY:INTERNAL={self.root.as_posix()}\nCARGO:FILEPATH=fixture-cargo\n"
@@ -108,6 +130,25 @@ class PackageTests(unittest.TestCase):
         original_run = subprocess.run
 
         def tool(*args, **kwargs):
+            if args[:2] == ("fixture-cargo", "metadata"):
+                self.assertIn("--frozen", args)
+                packages = tomllib.loads((self.root / "Cargo.lock").read_text())["package"]
+                return json.dumps({"packages": [dict(p, manifest_path=str(self.root / "Cargo.toml")
+                    if "source" not in p else "/cache/Cargo.toml") for p in packages]}).encode()
+            if args[:2] == ("fixture-cargo", "vendor"):
+                self.assertIn("--frozen", args)
+                self.assertIn("--versioned-dirs", args)
+                destination = Path(args[-1])
+                for name, files in self.crates.items():
+                    for relative, data in files.items():
+                        path = destination / name / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(data)
+                    write(destination / name / ".cargo-checksum.json", json.dumps({
+                        "package": self.checksum,
+                        "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}))
+                return ('[source.crates-io]\nreplace-with = "vendored-sources"\n'
+                        '[source.vendored-sources]\ndirectory = ' + json.dumps(str(destination)) + '\n').encode()
             if args[0] == "fixture-rustc":
                 return str(self.sysroot).encode() if "--print" in args else b"rustc fixture 1.0\n"
             if args[0] in {"fixture-cmake", "fixture-cargo"}:
@@ -118,6 +159,9 @@ class PackageTests(unittest.TestCase):
             if args[0] not in {"fixture-cmake", "fixture-cargo"}:
                 return original_run(args, **kwargs)
             if args[0] == "fixture-cmake" and "--build" in args:
+                home = Path(kwargs["env"]["CARGO_HOME"])
+                config = tomllib.loads((home / "config.toml").read_text())
+                self.assertTrue(config["net"]["offline"])
                 path = self.build / "Release/ColonyCamera.dll"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(pe_fixture())
@@ -179,6 +223,82 @@ class PackageTests(unittest.TestCase):
         write(self.root / "deps/commonlib/include/source.h", "uncommitted dependency\n")
         with self.assertRaisesRegex(packaging.PackageError, "source changes"):
             packaging.dependency_sources(self.root)
+
+    def test_locked_crate_sources_and_verbatim_notices_are_bundled(self):
+        self.add_crate()
+        tools, build = self.compiler_tools()
+        with tools, build:
+            output = packaging.package(self.args, self.root)
+        prefix = f"Camera-Colony-1.2.3-{self.revision[:12]}"
+        with zipfile.ZipFile(output / f"{prefix}.zip") as player:
+            self.assertEqual(set(player.namelist()), packaging.PLAYER_FILES)
+            for name, data in self.crates["serde-1.0.229"].items():
+                if name.startswith("LICENSE"):
+                    self.assertIn(data, player.read("LICENSES.txt"))
+        with zipfile.ZipFile(output / f"{prefix}-sources.zip") as sources:
+            metadata = json.loads(sources.read("build.json"))
+            self.assertEqual(metadata["rust_crates"][0]["checksum"], self.checksum)
+            self.assertEqual(metadata["cargo_lock_sha256"],
+                             hashlib.sha256((self.root / "Cargo.lock").read_bytes()).hexdigest())
+            with tarfile.open(fileobj=io.BytesIO(sources.read("rust-crates.tar.gz"))) as archive:
+                for name, data in self.crates["serde-1.0.229"].items():
+                    self.assertEqual(archive.extractfile(f"vendor/serde-1.0.229/{name}").read(), data)
+                config = tomllib.loads(archive.extractfile(".cargo/config.toml").read().decode())
+                self.assertTrue(config["net"]["offline"])
+                self.assertEqual(config["source"]["crates-io"]["replace-with"], "vendored-sources")
+                self.assertEqual(config["source"]["vendored-sources"]["directory"], "vendor")
+
+    @unittest.skipUnless(shutil.which("cargo"), "Cargo is required for the offline source rebuild regression")
+    def test_extracted_sources_build_offline_without_a_registry_cache(self):
+        self.add_crate()
+        tools, build = self.compiler_tools()
+        with tools, build:
+            output = packaging.package(self.args, self.root)
+        extracted = self.base / "extracted"
+        extracted.mkdir()
+        prefix = f"Camera-Colony-1.2.3-{self.revision[:12]}"
+        with zipfile.ZipFile(output / f"{prefix}-sources.zip") as sources:
+            with tarfile.open(fileobj=io.BytesIO(sources.read("colony-camera.tar.gz"))) as archive:
+                archive.extractall(extracted, filter="data")
+            root = extracted / "Colony-Camera"
+            with tarfile.open(fileobj=io.BytesIO(sources.read("rust-crates.tar.gz"))) as archive:
+                archive.extractall(root, filter="data")
+        environment = dict(os.environ, CARGO_HOME=str(self.base / "empty-cargo-home"), CARGO_NET_OFFLINE="true")
+        result = subprocess.run(["cargo", "check", "--frozen"], cwd=root, env=environment, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        # Directory-source checksums must still protect the extracted source.
+        write(root / "vendor/serde-1.0.229/src/lib.rs", "// altered crate source\n")
+        result = subprocess.run(["cargo", "check", "--frozen", "--target-dir", str(self.base / "fresh-target")],
+                                cwd=root, env=environment, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"checksum", result.stderr)
+
+    def test_crate_checksum_mismatch_or_missing_license_prevents_output(self):
+        self.add_crate()
+        for defect in ("checksum", "license"):
+            with self.subTest(defect=defect):
+                if defect == "checksum":
+                    self.checksum = "b" * 64
+                else:
+                    self.checksum = "a" * 64
+                    self.crates["serde-1.0.229"] = {"src/lib.rs": b"// No license\n"}
+                tools, build = self.compiler_tools()
+                with tools, build:
+                    with self.assertRaisesRegex(packaging.PackageError, "checksum" if defect == "checksum" else "license"):
+                        packaging.package(self.args, self.root)
+                self.assertFalse(self.args.output.exists())
+
+    @unittest.skipUnless(shutil.which("cargo"), "Cargo is required for the frozen lockfile regression")
+    def test_manifest_lockfile_dependency_mismatch_is_rejected_by_cargo(self):
+        write(self.base / "new-dependency/Cargo.toml", '[package]\nname="new-dependency"\nversion="1.0.0"\n')
+        write(self.base / "new-dependency/src/lib.rs", "pub fn dependency() {}\n")
+        with (self.root / "Cargo.toml").open("a") as file:
+            file.write('\n[dependencies]\nnew-dependency = { path = "../new-dependency" }\n')
+        original = (self.root / "Cargo.lock").read_bytes()
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaises(subprocess.CalledProcessError):
+                packaging.rust_sources(self.root, "cargo", Path(temp), 1700000000)
+        self.assertEqual((self.root / "Cargo.lock").read_bytes(), original)
 
     def test_wrong_dependency_commit_is_rejected(self):
         manifest = json.loads((self.root / "dependencies.json").read_text())
@@ -250,9 +370,8 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(packaging.PackageError, "versions disagree"):
             packaging.read_version(self.root)
         write(self.root / "CMakeLists.txt", "project(ColonyCamera VERSION 1.2.3)\n")
-        with (self.root / "Cargo.lock").open("a") as file:
-            file.write('[[package]]\nname = "new-dependency"\nversion = "1.0.0"\n')
-        with self.assertRaisesRegex(packaging.PackageError, "corresponding-source"):
+        write(self.root / "Cargo.lock", 'version = 4\n[[package]]\nname = "camera"\nversion = "1.2.2"\n')
+        with self.assertRaisesRegex(packaging.PackageError, "versions disagree"):
             packaging.read_version(self.root)
 
     def test_native_and_single_config_paths_and_wrong_checkout(self):
