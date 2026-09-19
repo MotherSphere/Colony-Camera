@@ -30,6 +30,32 @@ int main() {
     oldBranch.parent = &cachedBone; // Malformed ancestry must terminate.
     assert(!body_position::AttachedTo(&cachedBone, &skeleton));
 
+    // Cache hits avoid tree searches; detached children and changed roots must
+    // resolve again even when the original root address did not change.
+    Node armRoot, armBranch{&armRoot}, arm{&armBranch}, newArm{&armRoot};
+    Node* found = &arm;
+    unsigned searches = 0;
+    auto lookup = [&]() { ++searches; return found; };
+    Node* cached = body_position::ResolveAttached<Node>(nullptr, &armRoot, lookup);
+    assert(cached == &arm && searches == 1);
+    cached = body_position::ResolveAttached(cached, &armRoot, lookup);
+    assert(cached == &arm && searches == 1);
+    armBranch.parent = nullptr;
+    found = &newArm;
+    cached = body_position::ResolveAttached(cached, &armRoot, lookup);
+    assert(cached == &newArm && searches == 2);
+    Node otherRoot, otherArm{&otherRoot};
+    found = &otherArm;
+    cached = body_position::ResolveAttached(cached, &otherRoot, lookup);
+    assert(cached == &otherArm && searches == 3);
+    assert(!body_position::ResolveAttached(cached, &armRoot, lookup));
+    assert(searches == 4); // Reject a lookup result outside the requested tree.
+    found = nullptr;
+    assert(!body_position::ResolveAttached<Node>(nullptr, &armRoot, lookup));
+    assert(searches == 5);
+    assert(!body_position::ResolveAttached<Node>(cached, nullptr, lookup));
+    assert(searches == 5); // No tree to search.
+
     // Inventory opening must not release the body just because input/pausing changed.
     static_assert(body_position::RenderInventoryBody(true, true, false, 1, true));
     static_assert(body_position::RenderInventoryBody(true, true, false, 0, false));

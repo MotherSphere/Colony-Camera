@@ -2,18 +2,46 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 
 namespace timing {
+// Restore/prepare are inclusive; lookup and node-update timers are nested
+// diagnostics, not additional callback time. The final three fields are counts.
+enum BodyField { BodyRestore, BodyPrepare, BodyLookup, BodyUpdate, ArmsUpdate,
+    BodyUpdates, ArmsUpdates, ArmLookups, BodyFieldCount };
+using Body = std::array<double, BodyFieldCount>;
+
+// Disabled scopes never read the clock. Stop is idempotent for section boundaries
+// and the destructor closes early-return paths automatically.
+class Scope {
+    using Clock = std::chrono::steady_clock;
+    double* total_;
+    Clock::time_point start_;
+public:
+    Scope(Body* body, BodyField field) : total_(body ? &(*body)[field] : nullptr),
+        start_(total_ ? Clock::now() : Clock::time_point{}) {}
+    Scope(const Scope&) = delete;
+    Scope& operator=(const Scope&) = delete;
+    ~Scope() { Stop(); }
+    void Stop() {
+        if (!total_) return;
+        *total_ += std::chrono::duration<double, std::micro>(Clock::now() - start_).count();
+        total_ = nullptr;
+    }
+};
+
 // Microseconds of wall time in our callback. Native includes previously chained mods.
 struct Sample {
     double total{}, native{}, collision{}, math{}, scene{};
     bool applied{};
+    Body body{};
 };
 struct Totals {
     std::uint32_t samples{}, applied{};
     double own{}, native{}, collision{}, math{}, scene{}, peakOwn{};
+    Body body{};
 
 private:
     static constexpr std::size_t capacity = 64;
@@ -32,6 +60,13 @@ public:
         const std::array sums{own + overhead, native + s.native,
             collision + s.collision, math + s.math, scene + s.scene};
         for (const auto value : sums) if (!std::isfinite(value)) return;
+        Body bodySums{};
+        for (std::size_t i = 0; i < body.size(); ++i) {
+            if (!std::isfinite(s.body[i]) || s.body[i] < 0) return;
+            bodySums[i] = body[i] + s.body[i];
+            if (!std::isfinite(bodySums[i])) return;
+        }
+        body = bodySums;
         ++samples;
         applied += s.applied;
         own = sums[0]; native = sums[1]; collision = sums[2];

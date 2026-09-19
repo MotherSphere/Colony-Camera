@@ -3,6 +3,7 @@
 #include "body_facing.h"
 #include "core.h"
 #include "owned_value.h"
+#include "timing.h"
 #include <RE/Skyrim.h>
 #include <array>
 #include <chrono>
@@ -79,14 +80,24 @@ class Renderer {
         }
     }
 
-    void UpdateTransforms() {
+    void UpdateTransforms(timing::Body* metrics = nullptr) {
         // The native selected-transform pass can skip changed local transforms.
         // Update's full downward pass always publishes them. Keep kDirty clear:
         // the verified NiNode pass runs controllers only when that bit is set.
         if (!body_ || !Finite(body_->local) || !Finite(body_->world)) return;
         RE::NiUpdateData update{};
         update.flags.set(RE::NiUpdateData::Flag::kDisableCollision);
+        timing::Scope measure(metrics, timing::BodyUpdate);
+        if (metrics) ++(*metrics)[timing::BodyUpdates];
         body_->Update(update);
+    }
+
+    void UpdateArms(timing::Body* metrics) {
+        RE::NiUpdateData update{};
+        update.flags.set(RE::NiUpdateData::Flag::kDisableCollision);
+        timing::Scope measure(metrics, timing::ArmsUpdate);
+        if (metrics) ++(*metrics)[timing::ArmsUpdates];
+        nativeArms_->Update(update);
     }
 
     bool OwnsRenderedPose() const {
@@ -113,7 +124,8 @@ public:
 
     // Call before the chained native first-person update and on every exit/load.
     // NiPointer references keep any replaced skeleton alive until leases release.
-    void Restore() {
+    void Restore(timing::Body* metrics = nullptr) {
+        timing::Scope measure(metrics, timing::BodyRestore);
         const bool restoreWorld = OwnsRenderedPose();
         bool transformsChanged = false;
         if (body_) transformsChanged |= body_position::RestoreTranslation(bodyPosition_,
@@ -125,11 +137,7 @@ public:
         bool nativeChanged = false;
         for (std::size_t i = 0; i < nativeArmBones_.size(); ++i)
             if (nativeArmBones_[i]) nativeChanged |= nativeArmScales_[i].Restore(nativeArmBones_[i]->local.scale);
-        if (nativeChanged && nativeArms_) {
-            RE::NiUpdateData update{};
-            update.flags.set(RE::NiUpdateData::Flag::kDisableCollision);
-            nativeArms_->Update(update);
-        }
+        if (nativeChanged && nativeArms_) UpdateArms(metrics);
         if (body_) {
             bool hidden = body_->GetAppCulled();
             if (bodyVisibility_.Restore(hidden)) body_->SetAppCulled(hidden);
@@ -137,14 +145,14 @@ public:
         // The locals have already been returned to the native pose after publish.
         // Rebuild derived world transforms only while our captured outputs remain
         // ours. A native animation update or another writer takes precedence.
-        if (restoreWorld || (!renderWorldDirty_ && transformsChanged)) UpdateTransforms();
+        if (restoreWorld || (!renderWorldDirty_ && transformsChanged)) UpdateTransforms(metrics);
         renderWorldDirty_ = false;
         renderedParent_.reset();
         status_ = Status::inactive;
     }
 
-    void Reset() {
-        Restore();
+    void Reset(timing::Body* metrics = nullptr) {
+        Restore(metrics);
         for (auto& bone : bones_) bone.reset();
         for (auto& bone : nativeArmBones_) bone.reset();
         nativeArms_.reset();
@@ -154,8 +162,13 @@ public:
 
     Status Apply(RE::PlayerCharacter* player, const RE::NiPoint3& viewEye,
         const BodyAlignmentOptions& options, const RE::NiCamera* cameraObject,
-        bool measureMath = false) {
-        Restore();
+        bool measureMath = false, timing::Body* metrics = nullptr) {
+        Restore(metrics);
+        timing::Scope prepare(metrics, timing::BodyPrepare);
+        auto find = [&](RE::NiAVObject* root, const RE::BSFixedString& name) {
+            timing::Scope measure(metrics, timing::BodyLookup);
+            return root->GetObjectByName(name);
+        };
         alignmentSample_.available = false;
         facingSample_ = {};
         publicationSample_.available = false;
@@ -169,7 +182,7 @@ public:
         if (!rebuild && body)
             for (const auto& bone : bones_) rebuild |= !bone || !Attached(bone.get());
         if (rebuild) {
-            Reset();
+            Reset(metrics);
             body_.reset(body);
             nativeArms_.reset(arms);
             if (body_) {
@@ -178,7 +191,7 @@ public:
                 static const std::array<RE::BSFixedString, 3> names{
                     "NPC Head [Head]", "NPC L UpperArm [LUar]", "NPC R UpperArm [RUar]"};
                 for (std::size_t i = 0; i < bones_.size(); ++i)
-                    bones_[i].reset(body_->GetObjectByName(names[i]));
+                    bones_[i].reset(find(body_.get(), names[i]));
             }
         }
         if (!body_) return status_ = Status::missing_body;
@@ -187,7 +200,11 @@ public:
         static const std::array<RE::BSFixedString, 2> nativeNames{
             "NPC L UpperArm [LUar]", "NPC R UpperArm [RUar]"};
         for (std::size_t i = 0; i < nativeNames.size(); ++i) {
-            nativeArmBones_[i].reset(nativeArms_->GetObjectByName(nativeNames[i]));
+            nativeArmBones_[i].reset(body_position::ResolveAttached(nativeArmBones_[i].get(),
+                nativeArms_.get(), [&]() {
+                    if (metrics) ++(*metrics)[timing::ArmLookups];
+                    return find(nativeArms_.get(), nativeNames[i]);
+                }));
             if (!nativeArmBones_[i] || !Finite(nativeArmBones_[i]->local) ||
                 !body_position::IndependentRoots(nativeArmBones_[i].get(),
                     static_cast<const RE::NiAVObject*>(cameraObject)))
@@ -210,7 +227,7 @@ public:
         }
         if (!eyeNode_ || !Attached(eyeNode_.get())) {
             static const RE::BSFixedString eyeName("NPCEyeBone");
-            eyeNode_.reset(body_->GetObjectByName(eyeName));
+            eyeNode_.reset(find(body_.get(), eyeName));
         }
         const bool eyeAvailable = eyeNode_ && Attached(eyeNode_.get()) &&
             body_position::WorldMatchesLocal(eyeNode_->local, eyeNode_->world,
@@ -236,6 +253,7 @@ public:
         const auto& movement = actorState->actorState1;
         frame.movement = (movement.sneaking ? 1u : 0u) | (movement.movingRight ? 2u : 0u) |
             (movement.movingLeft ? 4u : 0u) | (movement.movingForward ? 8u : 0u) | (movement.movingBack ? 16u : 0u);
+        prepare.Stop();
         BodyAlignmentResult alignment{};
         if (measureMath) {
             const auto started = std::chrono::steady_clock::now();
@@ -281,9 +299,7 @@ public:
             for (std::size_t i = 0; i < nativeArmBones_.size(); ++i)
                 nativeArmScales_[i].Write(nativeArmBones_[i]->local.scale,
                     nativeArmBones_[i]->local.scale * 0.001f);
-            RE::NiUpdateData update{};
-            update.flags.set(RE::NiUpdateData::Flag::kDisableCollision);
-            nativeArms_->Update(update);
+            UpdateArms(metrics);
         }
         if (const auto& biped = player->GetBiped(false); biped) {
             for (auto slot : {RE::BIPED_OBJECTS::kHead, RE::BIPED_OBJECTS::kHair,
@@ -298,7 +314,7 @@ public:
         Hide(player->GetFaceNodeSkinned());
         bool hidden = body_->GetAppCulled();
         if (bodyVisibility_.Write(hidden, false)) body_->SetAppCulled(hidden);
-        UpdateTransforms();
+        UpdateTransforms(metrics);
         renderedBody_ = body_->world;
         renderedParent_.reset(body_->parent);
         for (std::size_t i = 0; i < bones_.size(); ++i) renderedBones_[i] = bones_[i]->world;
@@ -314,7 +330,7 @@ public:
             positionParent_.get(), body_->parent);
         positionParent_.reset();
         if (!publicationSample_.matched) {
-            Restore();
+            Restore(metrics);
             return status_ = Status::publication_failed;
         }
         return status_ = Status::applied;

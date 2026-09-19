@@ -17,6 +17,15 @@ bool AttachedTo(const Node* node, const Node* root) {
     return false;
 }
 
+// Reuse only nodes still attached to this root. Retained smart pointers keep
+// detached nodes alive, but do not make them valid members of a new skeleton.
+template<class Node, class Lookup>
+Node* ResolveAttached(Node* cached, const Node* root, Lookup&& lookup) {
+    if (AttachedTo(cached, root)) return cached;
+    auto* found = root ? lookup() : nullptr;
+    return AttachedTo(found, root) ? found : nullptr;
+}
+
 // Rendering can continue behind inventory without enabling gameplay controls.
 // Any other pause owner or blocking menu retains native fallback.
 constexpr bool RenderInventoryBody(bool firstPerson, bool inventoryOpen,

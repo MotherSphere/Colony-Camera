@@ -219,6 +219,15 @@ void ReportTiming(unsigned mode) {
         mode >= 2 ? "first" : "third", stages[mode / 2], mode % 2, t.samples, t.applied, t.own/t.samples, t.native/t.samples,
         t.collision/t.samples, t.math/t.samples, t.scene/t.samples, t.peakOwn,
         t.SampledCount(), t.SampledPercentile(0.50), t.SampledPercentile(0.95), t.SampledPercentile(0.99));
+    if (mode >= 2) {
+        const auto& b = t.body;
+        spdlog::info("PERF_BODY stage={} enabled={} samples={} mean_us: restore={:.2f} prepare={:.2f} lookup={:.2f} body_update={:.2f} arms_update={:.2f} mean_calls: body_updates={:.3f} arms_updates={:.3f} arm_lookups={:.3f}; nested timings, do not sum",
+            stages[mode / 2], mode % 2, t.samples,
+            b[timing::BodyRestore]/t.samples, b[timing::BodyPrepare]/t.samples,
+            b[timing::BodyLookup]/t.samples, b[timing::BodyUpdate]/t.samples,
+            b[timing::ArmsUpdate]/t.samples, b[timing::BodyUpdates]/t.samples,
+            b[timing::ArmsUpdates]/t.samples, b[timing::ArmLookups]/t.samples);
+    }
     t = {};
 }
 struct Probe {
@@ -231,6 +240,7 @@ struct Probe {
         sampled = activeCamera && (++frame[stage] % 16 == 0);
         start = Mark();
     }
+    timing::Body* BodyMetrics() { return sampled ? &result.body : nullptr; }
     Clock::time_point Mark() const { return sampled ? Clock::now() : Clock::time_point{}; }
     double Elapsed(Clock::time_point since) const {
         return sampled ? std::chrono::duration<double, std::micro>(Clock::now()-since).count() : 0.0;
@@ -406,7 +416,7 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.3.3 advanced-camera candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.3.4 advanced-camera candidate\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
             sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
@@ -677,7 +687,7 @@ void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
     auto* camera = RE::PlayerCamera::GetSingleton();
     if (!player || !camera || !camera->currentState
         || camera->currentState->id != RE::CameraState::kFirstPerson) {
-        bodyRenderer.Reset();
+        bodyRenderer.Reset(probe.BodyMetrics());
         if (camera && camera->currentState && camera->currentState->id == RE::CameraState::kFirstPerson)
             TraceBody(phaseIndex, BodyOutcome::native_fallback, CC_UNAVAILABLE);
         return;
@@ -688,11 +698,11 @@ void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
     const auto current = Coordinate(self, self->IsInputEventHandlingEnabled());
     probe.result.math = probe.Elapsed(stamp);
     if (current.owner != CC_FIRST_PERSON) {
-        bodyRenderer.Reset(); TraceBody(phaseIndex, BodyOutcome::native_fallback, current.reason); return;
+        bodyRenderer.Reset(probe.BodyMetrics()); TraceBody(phaseIndex, BodyOutcome::native_fallback, current.reason); return;
     }
     auto* rendered = RenderedCamera(camera);
     if (!rendered || firstPublishedState.get() != self || firstPublishedCamera.get() != rendered) {
-        bodyRenderer.Reset(); TraceBody(phaseIndex, BodyOutcome::view_not_ready); return;
+        bodyRenderer.Reset(probe.BodyMetrics()); TraceBody(phaseIndex, BodyOutcome::view_not_ready); return;
     }
     // GetTranslation is a raw model anchor. Skyrim adds dampening and collision
     // before publishing the view. Align to what is actually displayed instead.
@@ -714,7 +724,7 @@ void PublishFirstPersonBody(Probe& probe, unsigned phaseIndex) {
     }
     stamp = probe.Mark();
     const auto status = bodyRenderer.Apply(player, viewEye,
-        config.body_alignment, rendered, probe.sampled);
+        config.body_alignment, rendered, probe.sampled, probe.BodyMetrics());
     if (phaseIndex == 1) {
         lastBodyView = {bodyRenderer.GetFacingSample(), bodyRenderer.GetAlignmentSample(),
             bodyRenderer.GetPublicationSample(), current, viewCorrection, Clock::now(),
@@ -760,14 +770,14 @@ void BodySceneUpdate(RE::NiAVObject* object, RE::NiUpdateData* update) {
     const bool first = camera && camera->currentState && camera->currentState->id == RE::CameraState::kFirstPerson;
     Probe probe(first, config.enabled && config.first_person_enabled, 1);
     auto stamp = probe.Mark();
-    bodyRenderer.Restore();
+    bodyRenderer.Restore(probe.BodyMetrics());
     probe.result.scene = probe.Elapsed(stamp);
     stamp = probe.Mark();
     originalBodySceneUpdate(object, update);
     probe.result.native = probe.Elapsed(stamp);
     player = RE::PlayerCharacter::GetSingleton();
     if (!player || object != player->Get3D(true)) {
-        bodyRenderer.Reset(); TraceBody(0, BodyOutcome::native_fallback, CC_UNAVAILABLE); return;
+        bodyRenderer.Reset(probe.BodyMetrics()); TraceBody(0, BodyOutcome::native_fallback, CC_UNAVAILABLE); return;
     }
     PublishFirstPersonBody(probe, 0);
 }
@@ -782,7 +792,7 @@ void CameraViewUpdate(RE::TESCamera* self) {
     Probe probe(first, config.enabled && config.first_person_enabled, 2);
     auto stamp = probe.Mark();
     // Never let our previous rendered body become input to the native view solver.
-    if (first) bodyRenderer.Restore();
+    if (first) bodyRenderer.Restore(probe.BodyMetrics());
     ResetFirstView();
     probe.result.scene = probe.Elapsed(stamp);
     stamp = probe.Mark();
@@ -794,7 +804,7 @@ void CameraViewUpdate(RE::TESCamera* self) {
     if (!camera || self != camera || !first || camera->currentState != beforeState
         || (firstUpdatedInView != beforeState.get() && !(hadFirstView && InventoryBodyVisible()))) {
         lastBodyView = {};
-        bodyRenderer.Reset();
+        bodyRenderer.Reset(probe.BodyMetrics());
         if (first) TraceBody(1, BodyOutcome::view_not_ready);
         return;
     }
@@ -964,7 +974,7 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,3,3,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.PluginVersion({0,3,4,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
     info.CompatibleVersions({REL::Version{1,7,104,0}});
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
@@ -979,7 +989,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.3.3 advanced-camera candidate; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.3.4 advanced-camera candidate; runtime {}", skse->RuntimeVersion().string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};

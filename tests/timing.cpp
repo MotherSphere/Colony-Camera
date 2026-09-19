@@ -50,6 +50,53 @@ int main() {
             && descending.SampledPercentile(0.99) == 65,
             "Percentile query reordered the ring and evicted the wrong sample");
 
+        timing::Body measured{};
+        double stopped = 0;
+        {
+            timing::Scope scope(&measured, timing::BodyPrepare);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(20);
+            while (std::chrono::steady_clock::now() < deadline) {}
+            scope.Stop();
+            stopped = measured[timing::BodyPrepare];
+            Require(stopped > 0, "Enabled scope did not measure its section");
+            scope.Stop();
+        }
+        Require(measured[timing::BodyPrepare] == stopped,
+            "Stopping or destroying a closed scope counted the section again");
+        const auto beforeDisabled = measured;
+        { timing::Scope disabled(nullptr, timing::BodyPrepare); disabled.Stop(); }
+        Require(measured == beforeDisabled, "Disabled scope changed measurements");
+        auto earlyReturn = [&]() {
+            timing::Scope scope(&measured, timing::BodyRestore);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(20);
+            while (std::chrono::steady_clock::now() < deadline) {}
+            return;
+        };
+        earlyReturn();
+        Require(measured[timing::BodyRestore] > 0, "Early return lost its timing section");
+
+        timing::Sample bodySample{100, 20, 0, 5, 60, true};
+        bodySample.body[timing::BodyRestore] = 15;
+        bodySample.body[timing::BodyPrepare] = 10;
+        bodySample.body[timing::BodyLookup] = 2;
+        bodySample.body[timing::BodyUpdate] = 40;
+        bodySample.body[timing::ArmsUpdate] = 8;
+        bodySample.body[timing::BodyUpdates] = 2;
+        bodySample.body[timing::ArmsUpdates] = 1;
+        bodySample.body[timing::ArmLookups] = 2;
+        timing::Totals bodyTotals;
+        bodyTotals.Add(bodySample);
+        bodyTotals.Add(bodySample);
+        for (std::size_t i = 0; i < bodySample.body.size(); ++i)
+            Require(bodyTotals.body[i] == bodySample.body[i] * 2,
+                "Body timing/count fields were lost while aggregating");
+        bodySample.body[timing::BodyPrepare] = -1;
+        bodyTotals.Add(bodySample);
+        Require(bodyTotals.samples == 2 && bodyTotals.body[timing::BodyRestore] == 30,
+            "Invalid body measurements partially changed totals");
+        bodyTotals = {};
+        for (auto value : bodyTotals.body) Require(value == 0, "Body totals survived reset");
+
         const auto previous = totals;
         for (const auto invalid : {
             timing::Sample{std::numeric_limits<double>::quiet_NaN(), 0, 0, 0, 0, true},

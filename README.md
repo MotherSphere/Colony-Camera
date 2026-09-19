@@ -445,6 +445,15 @@ included input preparation and native INI lookup. Compare `own` across those
 versions rather than attributing that instrumentation change to a Rust speedup.
 The minimum-zoom setting is resolved once at data load and its live value is read
 per frame, avoiding repeated linear INI searches without freezing the setting.
+Since 0.3.4, `PERF_BODY` breaks first-person samples down into restoration,
+preparation, named-node lookup, full body updates and native-arm updates. It also
+reports average update and native-arm lookup counts per sampled callback.
+Restoration/preparation include nested work: do not add these fields together.
+Timing scopes read the clock only on sampled callbacks; their overhead is included
+in `own`. Preparation includes validation and camera/actor inputs, not just checks.
+Native arm nodes are cached while attached to the current root; root replacement
+or detached/missing nodes triggers a new lookup. Both body publication passes and
+all transform/ownership checks remain in place.
 The logs do not measure complete frame time, GPU body-render cost or unsampled
 worst-case spikes. Instrumentation overhead has not been calibrated.
 No fresh candidate FPS or compatibility benchmark is claimed. Compare native,
