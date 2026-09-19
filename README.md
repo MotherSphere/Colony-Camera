@@ -321,6 +321,22 @@ legitimate local game installation:
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<game>/Data/SKSE/Plugins/versionlib-1-7-104-0.bin"
 ```
 
+For multi-runtime investigation, the read-only inspector accepts Address Library
+formats 1, 2 and 5 and checks the executable's version resource against the database:
+
+```powershell
+python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<matching-address-library.bin>" --inspect > runtime-inspection.json
+```
+
+Inspection targets are Steam 1.6.1170, 1.6.640, 1.5.97 and 1.7.104. It checks primary
+camera RTTI, mapped executable entries and the reference model/final-view call
+instructions, then records their prefixes and surrounding bytes. The report contains
+addresses and small instruction samples, not the game executable. It does not install
+hooks or enable a runtime. A successful inspection still requires native ABI review
+and gameplay validation before adding a target to the DLL's allowlist. Only 1.7.104
+has a verified runtime profile in this build; the older targets remain rejected by
+both SKSE loader entry paths. Never remove this guard just because a database loads.
+
 The checks cover the cross-language ABI, configuration migration and atomic
 persistence, camera ownership, first-person body placement, render transforms,
 advanced interpolation/transition behavior and strict preset conversion. Runtime

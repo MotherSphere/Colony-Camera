@@ -979,8 +979,25 @@ extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Ve
     info.MinimumRequiredXSEVersion({2,3,1,0});
     return info;
 }();
+namespace {
+// Both SKSE entry paths share the allowlist. Older targets remain disabled until
+// their executable/callsite profiles have been verified; Address Library alone
+// does not prove that an instruction offset or native ABI is compatible.
+bool AcceptRuntime(const SKSE::QueryInterface* skse) {
+    return skse && !skse->IsEditor()
+        && skse->RuntimeVersion() == REL::Version{1,7,104,0}
+        && skse->SKSEVersion() >= REL::Version{2,3,1,0}.pack();
+}
+}
+extern "C" __declspec(dllexport) bool SKSEPlugin_Query(const SKSE::QueryInterface* skse, SKSE::PluginInfo* info) {
+    if (!info || !AcceptRuntime(skse)) return false;
+    info->infoVersion = SKSE::PluginInfo::kVersion;
+    info->name = SKSEPlugin_Version.pluginName;
+    info->version = SKSEPlugin_Version.pluginVersion;
+    return true;
+}
 extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface* skse) {
-    if (!skse || skse->RuntimeVersion() != REL::Version{1,7,104,0}) return false;
+    if (!AcceptRuntime(skse)) return false;
     SKSE::Init(skse, {.trampoline = true, .trampolineSize = 64});
     try {
         auto directory = SKSE::log::log_directory();
