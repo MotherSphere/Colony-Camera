@@ -17,6 +17,7 @@
 namespace {
 using Clock = std::chrono::steady_clock;
 CameraConfig config = cc_defaults();
+const runtime::Profile* runtimeProfile = nullptr;
 CameraState state{};
 AdvancedState advancedState{};
 std::atomic_uint commands{0};
@@ -416,8 +417,8 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.0\nRuntime 1.7.104.0\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
-            sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.1-rc.1\nRuntime {}\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+            runtimeProfile->name, sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
     }
@@ -886,11 +887,11 @@ void InstallHooks() {
         spdlog::error("SmoothCam.dll is loaded; disable SmoothCam before testing Colony Camera"); return;
     }
     auto* camera = RE::PlayerCamera::GetSingleton();
-    auto* third = camera ? camera->cameraStates[RE::CameraState::kThirdPerson].get() : nullptr;
+    auto* third = camera ? camera->GetRuntimeData().cameraStates[RE::CameraState::kThirdPerson].get() : nullptr;
     if (!third) { spdlog::error("Third-person camera state unavailable; hooks not installed"); return; }
     REL::Relocation<std::uintptr_t> vtable{*reinterpret_cast<std::uintptr_t*>(third)};
     const auto base = REL::Module::get().base();
-    if (vtable.address() != base + runtime::thirdVtable || !hooks::Memory(vtable.address(), 4 * sizeof(std::uintptr_t), false)) {
+    if (vtable.address() != base + runtimeProfile->thirdVtable || !hooks::Memory(vtable.address(), 4 * sizeof(std::uintptr_t), false)) {
         spdlog::error("Unexpected third-person vtable; hooks not installed"); return;
     }
     const auto* slots = reinterpret_cast<const std::uintptr_t*>(vtable.address());
@@ -907,24 +908,24 @@ void InstallHooks() {
     auto* first = camera->GetRuntimeData().cameraStates[RE::CameraState::kFirstPerson].get();
     if (!firstConflict && first) {
         std::uintptr_t sceneTarget = 0, viewTarget = 0;
-        REL::Relocation<std::uintptr_t> sceneAddress{REL::ID(70251)};
-        REL::Relocation<std::uintptr_t> bodySceneAddress{REL::ID(40522)};
-        REL::Relocation<std::uintptr_t> cameraAddress{REL::ID(33025)};
-        REL::Relocation<std::uintptr_t> playerCameraAddress{REL::ID(50784)};
+        REL::Relocation<std::uintptr_t> sceneAddress{RELOCATION_ID(68900, 70251)};
+        REL::Relocation<std::uintptr_t> bodySceneAddress{RELOCATION_ID(39446, 40522)};
+        REL::Relocation<std::uintptr_t> cameraAddress{RELOCATION_ID(32289, 33025)};
+        REL::Relocation<std::uintptr_t> playerCameraAddress{RELOCATION_ID(49852, 50784)};
         REL::Relocation<std::uintptr_t> firstTable{*reinterpret_cast<std::uintptr_t*>(first)};
         const auto* entries = reinterpret_cast<const std::uintptr_t*>(firstTable.address());
-        if (firstTable.address() == base + runtime::firstVtable
+        if (firstTable.address() == base + runtimeProfile->firstVtable
             && hooks::Memory(firstTable.address(), 6 * sizeof(std::uintptr_t), false)
-            && hooks::Entry(runtime::firstBegin, base) && hooks::Entry(runtime::firstEnd, base)
-            && hooks::Entry(runtime::firstUpdate, base) && hooks::Entry(runtime::firstTranslation, base)
-            && sceneAddress.address() == base + runtime::sceneUpdate.rva
-            && bodySceneAddress.address() == base + runtime::bodySceneUpdate.rva
-            && hooks::Entry(runtime::sceneUpdate, base) && hooks::Entry(runtime::bodySceneUpdate, base)
-            && hooks::SceneCallTarget(runtime::bodySceneCall, base, sceneTarget)
-            && cameraAddress.address() == base + runtime::cameraUpdate.rva
-            && playerCameraAddress.address() == base + runtime::playerCameraUpdate.rva
-            && hooks::Entry(runtime::cameraUpdate, base) && hooks::Entry(runtime::playerCameraUpdate, base)
-            && hooks::SceneCallTarget(runtime::cameraUpdateCall, base, viewTarget)
+            && hooks::Entry(runtimeProfile->firstBegin, base) && hooks::Entry(runtimeProfile->firstEnd, base)
+            && hooks::Entry(runtimeProfile->firstUpdate, base) && hooks::Entry(runtimeProfile->firstTranslation, base)
+            && sceneAddress.address() == base + runtimeProfile->sceneUpdate.rva
+            && bodySceneAddress.address() == base + runtimeProfile->bodySceneUpdate.rva
+            && hooks::Entry(runtimeProfile->sceneUpdate, base) && hooks::Entry(runtimeProfile->bodySceneUpdate, base)
+            && hooks::SceneCallTarget(runtimeProfile->bodySceneCall, base, sceneTarget)
+            && cameraAddress.address() == base + runtimeProfile->cameraUpdate.rva
+            && playerCameraAddress.address() == base + runtimeProfile->playerCameraUpdate.rva
+            && hooks::Entry(runtimeProfile->cameraUpdate, base) && hooks::Entry(runtimeProfile->playerCameraUpdate, base)
+            && hooks::SceneCallTarget(runtimeProfile->cameraUpdateCall, base, viewTarget)
             && SKSE::GetTrampoline().free_size() >= 28
             && hooks::ModuleCode(entries[1]) && hooks::ModuleCode(entries[2]) && hooks::ModuleCode(entries[3])
             && hooks::ModuleCode(entries[5])) {
@@ -932,8 +933,8 @@ void InstallHooks() {
             LogEntry("Final camera view", viewTarget);
             originalBodySceneUpdate = sceneTarget;
             originalCameraViewUpdate = viewTarget;
-            originalBodySceneUpdate = SKSE::GetTrampoline().write_call<5>(base + runtime::bodySceneCall.rva, BodySceneUpdate);
-            originalCameraViewUpdate = SKSE::GetTrampoline().write_call<5>(base + runtime::cameraUpdateCall.rva, CameraViewUpdate);
+            originalBodySceneUpdate = SKSE::GetTrampoline().write_call<5>(base + runtimeProfile->bodySceneCall.rva, BodySceneUpdate);
+            originalCameraViewUpdate = SKSE::GetTrampoline().write_call<5>(base + runtimeProfile->cameraUpdateCall.rva, CameraViewUpdate);
             originalFirstBegin = firstTable.write_vfunc(1, FirstBegin);
             originalFirstEnd = firstTable.write_vfunc(2, FirstEnd);
             originalFirstUpdate = firstTable.write_vfunc(3, FirstUpdate);
@@ -974,19 +975,18 @@ void Message(SKSE::MessagingInterface::Message* message) {
 
 extern "C" __declspec(dllexport) constinit SKSE::PluginVersionData SKSEPlugin_Version = [] {
     SKSE::PluginVersionData info;
-    info.PluginVersion({0,2,0,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
-    info.CompatibleVersions({REL::Version{1,7,104,0}});
-    info.MinimumRequiredXSEVersion({2,3,1,0});
+    info.PluginVersion({0,2,1,0}); info.PluginName("ColonyCamera"); info.AuthorName("MotherSphere");
+    info.CompatibleVersions({REL::Version{1,7,104,0}, REL::Version{1,6,1170,0},
+        REL::Version{1,6,640,0}, REL::Version{1,5,97,0}});
+    info.MinimumRequiredXSEVersion({2,0,20,0});
     return info;
 }();
 namespace {
-// Both SKSE entry paths share the allowlist. Older targets remain disabled until
-// their executable/callsite profiles have been verified; Address Library alone
-// does not prove that an instruction offset or native ABI is compatible.
+// Both loader paths use the same explicit runtime list and per-runtime SKSE floor.
 bool AcceptRuntime(const SKSE::QueryInterface* skse) {
-    return skse && !skse->IsEditor()
-        && skse->RuntimeVersion() == REL::Version{1,7,104,0}
-        && skse->SKSEVersion() >= REL::Version{2,3,1,0}.pack();
+    if (!skse || skse->IsEditor()) return false;
+    const auto* profile = runtime::Select(skse->RuntimeVersion().pack());
+    return profile && skse->SKSEVersion() >= profile->minimumSKSE;
 }
 }
 extern "C" __declspec(dllexport) bool SKSEPlugin_Query(const SKSE::QueryInterface* skse, SKSE::PluginInfo* info) {
@@ -998,6 +998,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Query(const SKSE::QueryInterfac
 }
 extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface* skse) {
     if (!AcceptRuntime(skse)) return false;
+    runtimeProfile = runtime::Select(skse->RuntimeVersion().pack());
     SKSE::Init(skse, {.trampoline = true, .trampolineSize = 64});
     try {
         auto directory = SKSE::log::log_directory();
@@ -1006,22 +1007,25 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.0; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.1-rc.1; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Runtime profile {}; SKSE {}; experimental multi-runtime build (gameplay validation pending)",
+            runtimeProfile->name, REL::Version::unpack(skse->SKSEVersion()).string());
         LoadConfig();
         const auto base = REL::Module::get().base();
         REL::Relocation<std::uintptr_t> collisionAddress{RELOCATION_ID(49899, 50832)};
         REL::Relocation<std::uintptr_t> matrixAddress{RELOCATION_ID(69271, 70641)};
-        if (collisionAddress.address() != base + runtime::collision.rva
-            || matrixAddress.address() != base + runtime::matrix.rva
-            || !hooks::Entry(runtime::collision, base) || !hooks::Entry(runtime::matrix, base)
-            || !hooks::Entry(runtime::begin, base) || !hooks::Entry(runtime::end, base) || !hooks::Entry(runtime::update, base)) {
+        if (collisionAddress.address() != base + runtimeProfile->collision.rva
+            || matrixAddress.address() != base + runtimeProfile->matrix.rva
+            || !hooks::Entry(runtimeProfile->collision, base) || !hooks::Entry(runtimeProfile->matrix, base)
+            || !hooks::Entry(runtimeProfile->begin, base) || !hooks::Entry(runtimeProfile->end, base) || !hooks::Entry(runtimeProfile->update, base)) {
             spdlog::error("Unexpected runtime camera addresses; initialization refused"); return false;
         }
         // Entry detours are valid: Improved Camera hooks collision through MinHook.
         // Offline verification checks the pristine executable; runtime calls retain these detours.
         LogEntry("Collision", collisionAddress.address());
-        REL::Relocation<std::uintptr_t> menuAddress{REL::ID(442726)};
-        menuAvailable = menuAddress.address() == base + runtime::messageBox.rva && hooks::Entry(runtime::messageBox, base);
+        REL::Relocation<std::uintptr_t> menuAddress{REL::RelocationID(51421,
+            skse->RuntimeVersion() < REL::Version{1,6,1130,0} ? 52270 : 442726)};
+        menuAvailable = menuAddress.address() == base + runtimeProfile->messageBox.rva && hooks::Entry(runtimeProfile->messageBox, base);
         if (!menuAvailable) spdlog::warn("Settings menu entry validation failed; use INI and reload instead");
         if (!SKSE::GetMessagingInterface()->RegisterListener(Message)) return false;
         spdlog::info("Waiting for a saved or new game before installing camera hooks");

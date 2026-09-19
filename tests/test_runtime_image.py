@@ -5,6 +5,7 @@ import struct
 import sys
 import unittest
 import tempfile
+import shutil
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 spec = importlib.util.spec_from_file_location("verify_runtime", Path(__file__).resolve().parents[1] / "scripts/verify-runtime.py")
 module = importlib.util.module_from_spec(spec)
@@ -109,6 +110,44 @@ class RuntimeImageTests(unittest.TestCase):
             altered=bytearray(data); offset=0x600+rva-0x2000
             altered[offset:offset+len(payload)]=payload
             with self.assertRaises(ValueError): self.inspect(bytes(altered),db)
+
+    def test_profile_verification_rejects_changed_evidence(self):
+        report=self.inspect(*camera_image((1,6,1170,0)))
+        lines=[]
+        for name,entry in report["entries"].items():
+            prefix=",".join(f"0x{b:02X}" for b in bytes.fromhex(entry["prefix"]))
+            lines.append(f'inline constexpr Entry {name}{{"Test", 0x{entry["rva"]:X}, {{{prefix}}}}};')
+        for name,rva in report["vtables"].items():
+            lines.append(f"inline constexpr std::uintptr_t {name} = 0x{rva:X};")
+        for name,call in report["calls"].items():
+            before,after=(",".join(f"0x{b:02X}" for b in bytes.fromhex(call[k])) for k in ("before","after"))
+            lines.append(f"inline constexpr SceneCall {name}{{0x{call['rva']:X}, 0x{call['target']:X}, {{{before}}}, {{{after}}}}};")
+        header="namespace steam161170 {\n"+"\n".join(lines)+"\n}"
+        self.assertEqual(module.verify_profile(report,header)["entries_verified"],14)
+        for altered in (header.replace("steam161170", "steam16640"),
+                        header.replace("0x3600", "0x3601"),
+                        header.replace("0x2140", "0x2148"),
+                        header.replace("0x38D7", "0x38D8"),
+                        header.replace("0x00", "0x01",1),
+                        header.replace("0x3900", "0x3910"),
+                        header.replace(lines[0],""),
+                        header.replace(lines[0],lines[0]+"\n"+lines[0])):
+            with self.subTest(header=altered), self.assertRaises(ValueError):
+                module.verify_profile(report,altered)
+
+    @unittest.skipUnless(shutil.which("c++"), "C++ compiler required")
+    def test_compiled_selection_cannot_hide_wrong_profile_binding(self):
+        header=(Path(__file__).resolve().parents[1]/"plugin/runtime.h").read_text()
+        # Independent literal subset is sufficient to catch the review's exact mutation.
+        report={"runtime":"1.7.104.0", "entries":{
+            "firstUpdate":{"rva":0x8F47A0,"prefix":"488bc45556574154415541564157488d"}},
+            "vtables":{}, "calls":{}}
+        module.verify_compiled_profile(report,"c++")
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"runtime.h"
+            path.write_text(header.replace("steam17104::firstUpdate", "steam17104::update"))
+            with self.assertRaisesRegex(ValueError,"Compiled runtime profile"):
+                module.verify_compiled_profile(report,"c++",path)
 
     def test_inspection_selects_version_specific_ids(self):
         self.assertEqual(module.runtime_ids((1,6,1170,0))["messageBox"], 442726)

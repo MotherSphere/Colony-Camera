@@ -1,14 +1,17 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. Version **0.2.0** adds advanced third-person following,
-SmoothCam JSON preset conversion, optional first-person body visibility and a
-structured SKSE Menu Framework interface.
+CommonLibSSE-NG bridge. Version **0.2.1-rc.1 is an experimental compatibility build**
+for Steam Skyrim 1.7.104, 1.6.1170, 1.6.640 and 1.5.97. It retains advanced
+third-person following, SmoothCam JSON preset conversion, optional first-person
+body visibility and the structured SKSE Menu Framework interface from 0.2.0.
 
-This release consolidates the locally tested builds through 0.3.4 under the public
-0.2.0 version number, following the published 0.1.2 release. Camera behavior is
-unchanged from development build 0.3.4. Existing settings remain compatible.
-This is not a complete SmoothCam or Improved Camera replacement.
+The Rust camera algorithms and configuration format are unchanged. The C++ bridge
+now selects exact, independently inspected executable profiles and matching
+Address Library IDs. Automated tests and offline checks pass; gameplay on the
+three older runtimes has not yet been validated. Test separately from your stable
+installation and report your exact runtime with the logs. This is not a complete
+SmoothCam or Improved Camera replacement.
 
 The filenames remain `ColonyCamera.dll` and `ColonyCamera.ini`.
 [0.1.2 and its corresponding sources](https://github.com/MotherSphere/Colony-Camera/releases/tag/v0.1.2)
@@ -168,9 +171,22 @@ defaults preserve the native camera; custom aiming displacement can reduce accur
 
 ## Requirements and safe installation
 
-The only target is **Steam Skyrim 1.7.104.0**, **SKSE 2.3.1** and the matching
-Address Library. Other runtimes, GOG and VR are unsupported. Exact runtime and
-entry-point checks reject unexpected code before the affected hooks are installed.
+Use the SKSE build and Address Library matching your **Steam** executable:
+
+| Skyrim | Minimum SKSE | Address Library file | Validation status |
+| --- | --- | --- | --- |
+| 1.7.104.0 | 2.3.1 | `versionlib-1-7-104-0.bin` | Existing camera behavior previously tested; candidate regression check requested |
+| 1.6.1170.0 | 2.2.6 | `versionlib-1-6-1170-0.bin` | Experimental; player testing needed |
+| 1.6.640.0 | 2.2.3 | `versionlib-1-6-640-0.bin` | Experimental; player testing needed |
+| 1.5.97.0 | 2.0.20 | `version-1-5-97-0.bin` | Experimental; player testing needed |
+
+Download SKSE from [its official website](https://skse.silverlock.org/) and use its
+archived-builds section when needed. The same Camera Colony DLL covers these four
+targets; it does not bundle or replace SKSE, Address Library or the game executable.
+GOG, VR and all other runtime versions are rejected. Exact runtime and instruction
+checks remain enabled. BEES is not a substitute for native DLL compatibility.
+SKSE Menu Framework is optional: install a framework build that itself supports
+your runtime. If unavailable, use the native Ctrl+F7 menu or INI settings.
 
 1. Close Skyrim and back up your installed DLL and INI. Install the mod as
    a separate mod providing `SKSE/Plugins/ColonyCamera.dll` and `ColonyCamera.ini`.
@@ -332,19 +348,21 @@ game unchanged. Keep game binaries outside this repository and release archives.
 python scripts/verify-runtime.py "<game>/SkyrimSE.exe" "<matching-address-library.bin>" --inspect > runtime-inspection.json
 ```
 
-Inspection targets are Steam 1.6.1170, 1.6.640, 1.5.97 and 1.7.104. It checks primary
-camera RTTI, mapped executable entries and the reference model/final-view call
-instructions, then records their prefixes and surrounding bytes. The report contains
-addresses and small instruction samples, not the game executable. It does not install
-hooks or enable a runtime. A successful inspection still requires native ABI review
-and gameplay validation before adding a target to the DLL's allowlist. Only 1.7.104
-has a verified runtime profile in this build; the older targets remain rejected by
-both SKSE loader entry paths. Never remove this guard just because a database loads.
+The inspector checks primary camera RTTI, mapped executable entries and both
+model/final-view call instructions. Without `--inspect`, it also compares all
+addresses, prefixes and call contexts against the selected profile in
+`plugin/runtime.h`. Add `--cxx c++` (or `--cxx clang++`) to compile assertions
+against the actual `runtime::Select` result as well. This catches incorrect field
+bindings even when the named constants remain correct. All four target executable
+profiles have passed both checks.
+The report contains addresses and small instruction samples, not the executable.
+It neither installs hooks nor proves gameplay compatibility. The loader accepts
+only the four listed runtimes and enforces their individual SKSE minimums.
 
 The checks cover the cross-language ABI, configuration migration and atomic
 persistence, camera ownership, first-person body placement, render transforms,
 advanced interpolation/transition behavior and strict preset conversion. Runtime
-verification covers 14 entries, two camera RTTI tables and both guarded callsites.
+verification covers 14 entries, three camera RTTI tables and both guarded callsites.
 Compilation and static export checks cannot verify rendering or compatibility.
 The existing whole-scene publication/restore mechanism is retained: replacing
 only node world transforms would omit native flattened-bone/skinning caches.

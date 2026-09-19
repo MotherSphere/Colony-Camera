@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import struct
+import subprocess
 from pathlib import Path
 
 
@@ -182,85 +183,71 @@ def inspect_runtime(exe, database):
             "database_sha256":hashlib.sha256(db).hexdigest()}
 
 
-def verify(exe, database):
-    data, db = exe.read_bytes(), database.read_bytes()
-    require(len(db) >= 96, "Truncated Address Library")
-    require(struct.unpack_from("<5I", db) == (5, 1, 7, 104, 0),
-            "Expected Address Library format 5 for 1.7.104.0")
-    ptr, encoding, count = struct.unpack_from("<3I", db, 84)
-    require((ptr, encoding) == (8, 0) and len(db) == 96 + count * 4,
-            "Unsupported database layout")
-    addresses = struct.unpack_from(f"<{count}I", db, 96)
-    base, read, version = read_image(data)
-    require(version == (1, 7, 104, 0), "Executable version does not match verified runtime")
-
-    header = (Path(__file__).resolve().parents[1] / "plugin/runtime.h").read_text()
-    entries = re.findall(r'Entry (\w+)\{"\w+", (0x[0-9A-F]+), \{([^}]+)\}', header)
-    expected = {"begin", "end", "update", "collision", "matrix",
-                "firstBegin", "firstEnd", "firstUpdate", "firstTranslation", "messageBox",
-                "sceneUpdate", "bodySceneUpdate", "cameraUpdate", "playerCameraUpdate"}
-    require(len(entries) == len(expected) and {e[0] for e in entries} == expected,
-            "Runtime header entry inventory differs from verifier")
-    vtables = dict(re.findall(r'std::uintptr_t (\w+Vtable) = (0x[0-9A-F]+);', header))
-    table_ids = {"thirdVtable": (205236, "ThirdPersonState"),
-                 "firstVtable": (214855, "FirstPersonState")}
-    for name, (identifier, class_name) in table_ids.items():
-        require(identifier < count and name in vtables, f"Missing {name} database entry")
-        rva = int(vtables[name], 16)
-        require(addresses[identifier] == rva, f"{name}: Address Library mismatch")
-        # Primary MSVC complete-object locator: verify class identity and offset 0.
-        locator = struct.unpack("<Q", read(rva-8, 8))[0] - base
-        signature, offset, _, descriptor, _, self_rva = struct.unpack("<6I", read(locator, 24))
-        require((signature, offset, self_rva) == (1, 0, locator), f"{name}: invalid primary RTTI locator")
-        type_name = f".?AV{class_name}@@\0".encode("ascii")
-        require(read(descriptor+16, len(type_name)) == type_name, f"{name}: RTTI class mismatch")
-    direct_ids = {"collision": 50832, "matrix": 70641, "messageBox": 442726,
-                  "sceneUpdate": 70251, "bodySceneUpdate": 40522,
-                  "cameraUpdate": 33025, "playerCameraUpdate": 50784}
-    for name, rva_text, prefix_text in entries:
-        rva = int(rva_text, 16)
-        prefix = bytes(int(x, 16) for x in prefix_text.split(','))
-        require(len(prefix) == 16 and read(rva, 16, executable=True) == prefix,
-                f"{name}: entry bytes mismatch")
-        if name in direct_ids:
-            identifier = direct_ids[name]
-            require(identifier < count and addresses[identifier] == rva,
-                    f"{name}: Address Library mismatch")
-        else:
-            first = name.startswith("first")
-            method = name[5:].lower() if first else name
-            slot = {"begin": 1, "end": 2, "update": 3, "translation": 5}[method]
-            table = int(vtables["firstVtable" if first else "thirdVtable"], 16)
-            require(struct.unpack("<Q", read(table+8*slot, 8))[0] == base+rva,
-                    f"{name}: vtable slot mismatch")
+def verify_profile(report, header):
+    """Compare compiled-profile declarations with independently inspected evidence."""
+    namespace = "steam" + report["runtime"].removesuffix(".0").replace(".", "")
+    blocks = re.findall(r"namespace " + re.escape(namespace) + r" \{(.*?)\n\}", header, re.S)
+    require(len(blocks) == 1, "Missing or ambiguous runtime profile")
+    block = blocks[0]
+    entries = re.findall(r'Entry (\w+)\{"\w+", (0x[0-9A-F]+), \{([^}]+)\}', block)
+    require(len(entries) == len(report["entries"])
+            and {entry[0] for entry in entries} == set(report["entries"]),
+            "Runtime profile entry inventory mismatch")
+    for name, rva, prefix in entries:
+        actual = {"rva": int(rva,16), "prefix": bytes(int(x,16) for x in prefix.split(",")).hex()}
+        require(actual == report["entries"][name], f"{name}: entry profile mismatch")
+    tables = re.findall(r'std::uintptr_t (\w+Vtable) = (0x[0-9A-F]+);', block)
+    require(len(tables) == len(report["vtables"])
+            and {name:int(rva,16) for name,rva in tables} == report["vtables"],
+            "Runtime profile vtable mismatch")
     calls = re.findall(r'SceneCall (\w+)\{(0x[0-9A-F]+), (0x[0-9A-F]+),\s*'
-                       r'\{([^}]+)\},\s*\{([^}]+)\}\};', header)
-    # These instruction offsets were decoded from the supplied 1.7.104 image.
-    expected_calls = {"bodySceneCall": (40522, 0xD7, 70251),
-                      "cameraUpdateCall": (50784, 0x1A6, 33025)}
-    require(len(calls) == len(expected_calls) and {c[0] for c in calls} == set(expected_calls),
-            "Runtime call inventory differs from verifier")
-    for name, site_text, target_text, before_text, after_text in calls:
-        site, target = int(site_text, 16), int(target_text, 16)
-        before, after = (bytes(int(x, 16) for x in part.split(','))
-                         for part in (before_text, after_text))
-        require(len(before) == 14 and len(after) == 12, f"{name}: context size mismatch")
-        require(read(site-len(before), len(before), executable=True) == before
-                and read(site+5, len(after), executable=True) == after,
-                f"{name}: context mismatch")
-        instruction = read(site, 5, executable=True)
-        require(instruction[0] == 0xE8 and site+5+struct.unpack_from('<i', instruction, 1)[0] == target,
-                f"{name}: instruction or target mismatch")
-        owner_id, offset, target_id = expected_calls[name]
-        require(owner_id < count and target_id < count
-                and target == addresses[target_id] and site == addresses[owner_id]+offset,
-                f"{name}: Address Library owner/target mismatch")
-    return {"runtime": "1.7.104.0", "entries_verified": len(entries),
-            "scene_calls_verified": 1,
-            "camera_calls_verified": 1,
-            "rtti_vtables_verified": len(table_ids),
-            "exe_sha256": hashlib.sha256(data).hexdigest(),
-            "database_sha256": hashlib.sha256(db).hexdigest()}
+                       r'\{([^}]+)\},\s*\{([^}]+)\}\};', block)
+    require(len(calls) == len(report["calls"])
+            and {call[0] for call in calls} == set(report["calls"]),
+            "Runtime profile call inventory mismatch")
+    for name, rva, target, before, after in calls:
+        actual = {"rva":int(rva,16), "target":int(target,16),
+                  "before":bytes(int(x,16) for x in before.split(",")).hex(),
+                  "after":bytes(int(x,16) for x in after.split(",")).hex()}
+        require(actual == report["calls"][name], f"{name}: call profile mismatch")
+    return {"runtime":report["runtime"], "entries_verified":len(entries),
+            "scene_calls_verified":1, "camera_calls_verified":1,
+            "rtti_vtables_verified":len(tables),
+            "status":"profile_verified_gameplay_unverified",
+            "exe_sha256":report["exe_sha256"], "database_sha256":report["database_sha256"]}
+
+
+def verify_compiled_profile(report, cxx, header_path=None):
+    """Compile assertions against Select(), not merely the named constants."""
+    path = header_path or Path(__file__).resolve().parents[1] / "plugin/runtime.h"
+    version = list(map(int,report["runtime"].split(".")))
+    packed = version[0]<<24 | version[1]<<16 | version[2]<<4 | version[3]
+    lines = ['#include "runtime.h"', f'constexpr auto p = runtime::Select({packed}u);',
+             'static_assert(p != nullptr);', f'static_assert(p->version == {packed}u);']
+    def scalar(field, value): lines.append(f"static_assert(p->{field} == {value}u);")
+    def array(field, value):
+        data = bytes.fromhex(value)
+        lines.append(f"static_assert(p->{field} == std::array<unsigned char,{len(data)}>{{"
+                     + ",".join(map(str,data)) + "});")
+    for name, entry in report["entries"].items():
+        scalar(name+".rva",entry["rva"]); array(name+".prefix",entry["prefix"])
+    for name, rva in report["vtables"].items(): scalar(name,rva)
+    for name, call in report["calls"].items():
+        for field in ("rva","target"): scalar(name+"."+field,call[field])
+        for field in ("before","after"): array(name+"."+field,call[field])
+    result = subprocess.run([cxx,"-std=c++20","-fsyntax-only","-x","c++","-I",str(path.parent),"-"],
+                            input="\n".join(lines),text=True,capture_output=True,timeout=60)
+    require(result.returncode == 0, "Compiled runtime profile mismatch: " + result.stderr[-4000:])
+
+
+def verify(exe, database, cxx=None):
+    report = inspect_runtime(exe, database)
+    header = (Path(__file__).resolve().parents[1] / "plugin/runtime.h").read_text()
+    result = verify_profile(report, header)
+    if cxx:
+        verify_compiled_profile(report,cxx)
+        result["compiled_profile_verified"] = True
+    return result
 
 
 if __name__ == "__main__":
@@ -269,8 +256,12 @@ if __name__ == "__main__":
     parser.add_argument("database", type=Path)
     parser.add_argument("--inspect", action="store_true",
                         help="Collect candidate runtime evidence without claiming compatibility")
+    parser.add_argument("--cxx", help="Also compile Select() assertions with c++ or clang++")
     args = parser.parse_args()
+    if args.inspect and args.cxx:
+        parser.error("--cxx verifies a compiled profile; use it without --inspect")
     try:
-        print(json.dumps((inspect_runtime if args.inspect else verify)(args.exe, args.database), indent=2))
-    except (OSError, ValueError, struct.error) as error:
+        result = inspect_runtime(args.exe,args.database) if args.inspect else verify(args.exe,args.database,args.cxx)
+        print(json.dumps(result,indent=2))
+    except (OSError, ValueError, struct.error, subprocess.TimeoutExpired) as error:
         raise SystemExit(f"Runtime verification failed: {error}") from error
