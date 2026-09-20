@@ -60,7 +60,7 @@ int main() {
     }
     auto c = cc_defaults();
     assert(c.enabled == 1 && c.keys[0] == 0x42);
-    assert(c.first_person_enabled == 0 && c.body_alignment.alignment_enabled == 1);
+    assert(c.first_person_enabled == 1 && c.body_alignment.alignment_enabled == 1);
     assert(c.third_person_enabled == 1);
     assert(c.body_alignment.body_backset == 8 && c.body_alignment.body_side == 0);
     BodyAlignmentFrame body{{0,0,130},{0,0,125},{0,2},1,{0,3,129},1,{0,0,0},

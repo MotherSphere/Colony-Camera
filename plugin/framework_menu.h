@@ -123,7 +123,7 @@ inline void Submit(bool save) {
     });
 }
 inline bool Begin() {
-    ImGuiMCP::TextUnformatted("Camera Colony 0.2.1-rc.1");
+    ImGuiMCP::TextUnformatted("Camera Colony 0.2.1-rc.2");
     ImGuiMCP::SameLine();
     ImGuiMCP::TextUnformatted(busy ? "  Applying..." : dirty ? "  Draft modified" : "  Draft matches active settings");
     if (busy) return false;
@@ -193,8 +193,8 @@ inline void __stdcall FirstPerson() {
     std::lock_guard lock(mutex);
     if (!Begin()) return;
     ImGuiMCP::SeparatorText("Body visibility");
-    Toggle("Show first-person body", draft.first_person_enabled);
-    Help("Keeps the native first-person camera and weapon rig. Unsupported actions and competing body providers use native fallback.");
+    Toggle("Show first-person body when Improved Camera is absent", draft.first_person_enabled);
+    Help("Enabled by default. A loaded Improved Camera DLL automatically disables Colony first-person hooks, even when this preference is checked. Third-person settings are independent.");
     Toggle("Align body with the camera", draft.body_alignment.alignment_enabled);
     ImGuiMCP::SeparatorText("Body placement");
     if (Form("body-placement")) {

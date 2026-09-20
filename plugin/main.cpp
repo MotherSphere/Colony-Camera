@@ -261,7 +261,7 @@ void LoadConfig() {
         return;
     }
     ApplyConfig(replacement);
-    spdlog::info("Configuration loaded; enabled={}", config.enabled);
+    spdlog::info("Configuration loaded; enabled={} first_person_requested={}", config.enabled, config.first_person_enabled);
 }
 
 bool NativeAim(RE::PlayerCharacter* player, RE::PlayerCamera* camera) {
@@ -417,7 +417,7 @@ void ProcessCommands() {
             ? std::format("\nRaw-to-rendered view correction ({:.2f}, {:.2f}, {:.2f})",
                 snapshot.viewCorrection.x, snapshot.viewCorrection.y, snapshot.viewCorrection.z)
             : std::string("\nNo raw-to-rendered correction in this camera-view sample.");
-        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.1-rc.1\nRuntime {}\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
+        settingsMenu.Open(config, ApplyConfig, std::format("Version 0.2.1-rc.2\nRuntime {}\nLast owner: {}\nState: {}\nThird-person camera: {}\nFirst-person hooks: {}  competing provider: {}{}{}{}{}",
             runtimeProfile->name, sampleDecision.owner < std::size(owners) ? owners[sampleDecision.owner] : "Unknown",
             sampleDecision.reason < std::size(reasons) ? reasons[sampleDecision.reason] : "Unknown", config.third_person_enabled != 0,
             firstHooksInstalled, firstConflict, sampleText, correctionText, alignmentText, publicationText), facingText, logText);
@@ -942,7 +942,7 @@ void InstallHooks() {
             spdlog::info("First-person body publication installed after native model and final camera passes");
         } else spdlog::error("First-person vtable/model call validation or trampoline capacity failed; body experiment disabled");
     }
-    if (firstConflict) spdlog::warn("Improved Camera detected; Colony Camera body experiment is disabled");
+    if (firstConflict) spdlog::info("Improved Camera detected; Colony first-person hooks automatically disabled regardless of settings; third-person hooks remain active");
     spdlog::info("Camera hooks installed after game load; ImprovedCameraSE={}", (GetModuleHandleW(L"ImprovedCamera.dll") != nullptr || GetModuleHandleW(L"ImprovedCameraSE.dll") != nullptr));
 }
 void Message(SKSE::MessagingInterface::Message* message) {
@@ -1007,7 +1007,7 @@ extern "C" __declspec(dllexport) bool SKSEPlugin_Load(const SKSE::LoadInterface*
         auto logger = std::make_shared<spdlog::logger>("ColonyCamera",
             std::make_shared<spdlog::sinks::basic_file_sink_mt>(activeLogPath, true));
         spdlog::set_default_logger(logger); spdlog::flush_on(spdlog::level::info);
-        spdlog::info("Camera Colony 0.2.1-rc.1; runtime {}", skse->RuntimeVersion().string());
+        spdlog::info("Camera Colony 0.2.1-rc.2; runtime {}", skse->RuntimeVersion().string());
         spdlog::info("Runtime profile {}; SKSE {}; experimental multi-runtime build (gameplay validation pending)",
             runtimeProfile->name, REL::Version::unpack(skse->SKSEVersion()).string());
         LoadConfig();

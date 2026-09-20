@@ -1,7 +1,7 @@
 # Camera Colony
 
 An independent Skyrim camera plugin with a deterministic Rust core and a C++
-CommonLibSSE-NG bridge. Version **0.2.1-rc.1 is an experimental compatibility build**
+CommonLibSSE-NG bridge. Version **0.2.1-rc.2 is an experimental compatibility build**
 for Steam Skyrim 1.7.104, 1.6.1170, 1.6.640 and 1.5.97. It retains advanced
 third-person following, SmoothCam JSON preset conversion, optional first-person
 body visibility and the structured SKSE Menu Framework interface from 0.2.0.
@@ -120,8 +120,14 @@ oversized files are rejected without partially changing settings.
   reload and Camera Colony presets. No SkyUI, Papyrus scripts, ESP or external
   interface assets are required.
 
-The **first-person body experiment is off by default**. It attempts to display a
-conventional humanoid third-person body while retaining Skyrim's native camera.
+The **first-person body feature is enabled by default**. A loaded `ImprovedCamera.dll`
+or `ImprovedCameraSE.dll` takes priority: Colony skips its first-person hooks, even
+if its body preference is enabled. Colony third-person functionality remains available.
+Removing Improved Camera and restarting restores Colony first person when its
+preference is enabled. An explicit `enabled=false` in an existing `[first_person]`
+section is preserved; enable it in the menu if desired.
+
+Colony displays a conventional humanoid third-person body while retaining Skyrim's native camera.
 Confirmed sheathed ordinary movement uses body arms; drawing, drawn and sheathing
 weapons, readied fists or an equipped torch use native first-person arms. Unknown
 weapon states also retain the native rig. Head/third-person arm masking and equipment visibility
@@ -195,8 +201,9 @@ your runtime. If unavailable, use the native Ctrl+F7 menu or INI settings.
    Colony's camera hooks from installing. A detected `ImprovedCamera.dll` or
    `ImprovedCameraSE.dll` disables only this plugin's first-person body experiment.
    Other full camera providers are not comprehensively detected.
-3. Launch through SKSE when ready to test. Start with first-person body visibility
-   off. Enable it separately after checking ordinary third-person operation.
+3. Launch through SKSE when ready to test. First-person body visibility is enabled
+   by default without Improved Camera. You can disable it separately in the menu
+   or INI; existing explicit opt-outs are preserved.
 4. Inspect `ColonyCamera.log` in the active SKSE log directory, normally under
    `Documents/My Games/Skyrim Special Edition/SKSE`. Documents may be redirected;
    Proton uses the game's actual prefix. **Diagnostics > Log location** displays
@@ -245,8 +252,8 @@ first-person enabled state. Missing `[third_person] enabled` defaults to true.
 The third-person switch affects only that perspective; first person retains its
 own switch. Ctrl+F8 / General > Toggle effect remains the master switch for both.
 Missing alignment fields use the new defaults;
-the body experiment remains off in a fresh configuration. Missing locomotion
-sections remain inactive. Missing `offset_half_life` inherits an explicitly supplied
+first-person body visibility defaults to on, with Improved Camera taking priority.
+Missing locomotion sections remain inactive. Missing `offset_half_life` inherits an explicitly supplied
 legacy `half_life`. Existing key remaps are retained; if an older binding already
 uses F7, an unused menu key is chosen. Unknown/duplicate fields, conflicting keys,
 non-finite numbers and out-of-range values reject the entire file.

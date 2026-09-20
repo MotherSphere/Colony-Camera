@@ -30,12 +30,12 @@ fn loads_partial_profiles_and_preserves_native_aim_by_default() {
 }
 
 #[test]
-fn legacy_settings_preserve_bindings_and_do_not_activate_new_policies() {
+fn legacy_settings_preserve_bindings_and_keep_locomotion_opt_in() {
     let c = parse_config("[general]\ntoggle_key=65\n[combat]\nhalf_life=0.2").unwrap();
     assert_eq!(c.keys[0], 65);
     assert_ne!(c.menu_key, 65);
     assert_eq!(c.locomotion_profiles, 0);
-    assert_eq!(c.first_person_enabled, 0);
+    assert_eq!(c.first_person_enabled, 1);
     assert_eq!(c.profiles[1].offset_half_life, 0.2);
 }
 
@@ -86,7 +86,7 @@ fn legacy_body_experiment_gets_alignment_without_changing_enablement_or_bindings
     }
     let old_off = parse_config("[first_person]\nenabled=false").unwrap();
     assert_eq!(old_off.first_person_enabled, 0);
-    assert_eq!(colony_camera::Config::default().first_person_enabled, 0);
+    assert_eq!(colony_camera::Config::default().first_person_enabled, 1);
 }
 
 #[test]
@@ -174,4 +174,16 @@ fn advanced_settings_roundtrip_and_legacy_stays_legacy() {
     );
     assert_ne!(invalid, encoded);
     assert!(parse_config(&invalid).is_err());
+}
+
+#[test]
+fn first_person_defaults_on_but_preserves_explicit_opt_out() {
+    let bundled = parse_config(include_str!("../assets/SKSE/Plugins/ColonyCamera.ini")).unwrap();
+    assert_eq!(bundled.first_person_enabled, 1);
+    for text in ["", "[first_person]", "[general]\nformat_version=6"] {
+        assert_eq!(parse_config(text).unwrap().first_person_enabled, 1);
+    }
+    let disabled = parse_config("[first_person]\nenabled=false").unwrap();
+    let saved = colony_camera::serialize_config(&disabled).unwrap();
+    assert_eq!(parse_config(&saved).unwrap().first_person_enabled, 0);
 }

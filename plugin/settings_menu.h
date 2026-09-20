@@ -135,7 +135,7 @@ class Menu {
         });
     }
     void FirstPerson() {
-        Page(std::format("First Person\nBody experiment: {}  Alignment: {}\nBody backset: {:.1f}  Sideways: {:.1f}\nStable body placement behind the native camera; head motion does not shift the whole body. Body arms while sheathed, native hands for weapons or a torch. Body size and height are unchanged.",
+        Page(std::format("First Person\nBody preference: {}  Alignment: {}\nBody backset: {:.1f}  Sideways: {:.1f}\nEnabled by default. Improved Camera automatically takes priority; this preference cannot override it.\nStable body placement behind the native camera; head motion does not shift the whole body. Body arms while sheathed, native hands for weapons or a torch. Body size and height are unchanged.",
             draft.first_person_enabled ? "Requested" : "Off", draft.body_alignment.alignment_enabled ? "On" : "Off",
             draft.body_alignment.body_backset, draft.body_alignment.body_side),
             {"Toggle body experiment", "Toggle alignment", "Body backset", "Body sideways", "Reset alignment", "Back"}, [this](auto b) {

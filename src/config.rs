@@ -52,7 +52,7 @@ impl Default for Config {
             keys: [0x42, 0x43, 0x44],
             enabled: 1,
             menu_key: 0x41,
-            first_person_enabled: 0,
+            first_person_enabled: 1,
             locomotion_profiles: 0,
             body_alignment: BodyAlignmentOptions::default(),
             third_person_enabled: 1,
@@ -87,8 +87,8 @@ fn boolean(value: &str) -> Result<u32, String> {
         _ => Err("expected true or false".into()),
     }
 }
-/// Missing legacy fields retain their old meaning. New locomotion sections opt
-/// in when present, unless `active=false`; legacy files never activate them.
+/// Missing first-person enablement defaults to on; explicit opt-outs are retained.
+/// New locomotion sections opt in when present, unless `active=false`.
 pub fn parse_config(text: &str) -> Result<Config, String> {
     if text.len() > MAX_CONFIG_BYTES {
         return Err("configuration exceeds 512 KiB".into());
