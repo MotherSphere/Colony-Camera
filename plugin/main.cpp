@@ -10,6 +10,7 @@
 #include "timing.h"
 #include "pov_transition.h"
 #include "camera_space.h"
+#include "follow_transition.h"
 #include "first_person.h"
 #include "settings_menu.h"
 #include "framework_menu.h"
@@ -19,6 +20,8 @@
 namespace {
 using Clock = std::chrono::steady_clock;
 CameraConfig config = cc_defaults();
+ThirdOptions effectiveThird = config.third;
+camera::FollowTransition followTransition;
 CameraState state{};
 AdvancedState advancedState{};
 // Temporary diagnostic: retain only the latest 600 frames, with no log I/O
@@ -237,6 +240,8 @@ void ApplyConfig(const CameraConfig& replacement) {
     if (appliedTo) RestoreNative(appliedTo.get());
     RestoreCamera(true);
     config = replacement;
+    effectiveThird = config.third;
+    followTransition = {};
     framework_menu::Sync(config);
     for (int i = 0; i < 3; ++i) bindings[i].store(config.keys[i]);
     menuBinding = config.menu_key;
@@ -626,7 +631,10 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
             config.third.preset_geometry, group, stance, focus.x, focus.y, focus.z,
             presetZoom, config.third.min_distance, config.third.zoom_scale);
         stamp = probe.Mark();
-        const auto result = cc_step_advanced(&advancedState, &input, &config.third, &advancedCandidate);
+        const auto selected = group*4 + stance;
+        effectiveThird.profiles[selected] = followTransition.Step(config.third.profiles[selected],
+            selected, dt, config.third.offset_duration, reset || !advancedState.initialized);
+        const auto result = cc_step_advanced(&advancedState, &input, &effectiveThird, &advancedCandidate);
         probe.result.math = probe.Elapsed(stamp);
         if (result) { state = {}; advancedState = {}; return; }
         advanced = advancedCandidate.initialized != 0;
