@@ -72,3 +72,7 @@ add_dependencies(camera_framework_menu camera_rust)
 target_link_libraries(camera_framework_menu PRIVATE CommonLibSSE "${RUST_LIB}" ntdll userenv ws2_32 bcrypt synchronization)
 target_compile_options(camera_framework_menu PRIVATE /UNDEBUG)
 add_test(NAME camera_framework_menu COMMAND camera_framework_menu)
+
+add_executable(camera_collision_output tests/collision_output.cpp)
+target_compile_options(camera_collision_output PRIVATE /UNDEBUG)
+add_test(NAME camera_collision_output COMMAND camera_collision_output)

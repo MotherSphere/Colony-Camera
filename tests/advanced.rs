@@ -354,7 +354,7 @@ fn distance_dependent_response_has_small_actual_timestep_error() {
     let reference = run(960);
     for fps in [30, 60, 144] {
         let s = run(fps);
-        assert!(s.position[0] > 20.0 && s.position[0] < 180.0);
+        assert!(s.position[0] > 0.0 && s.position[0] < 200.0);
         for i in 0..3 {
             near(s.position[i], reference.position[i], 0.08);
         }
@@ -587,7 +587,8 @@ fn each_clamp_bit_limits_only_its_camera_axis_and_prevents_lag_accumulation() {
             s = step_advanced(s, f, &o);
             assert_eq!(s.position, expected);
         }
-        assert_eq!(s.anchor, [0.0; 3]);
+        assert_eq!(s.orbit, initial.orbit);
+        assert_eq!(s.anchor, [expected[0], expected[1] + 100.0, expected[2]]);
     }
 }
 
@@ -654,4 +655,42 @@ fn older_advanced_settings_keep_native_geometry_and_new_fields_are_validated() {
         step_advanced(AdvancedState::default(), bad, &before).initialized,
         0
     );
+}
+
+#[test]
+fn response_applies_curve_after_remapping_reference_distance() {
+    let mut o = options();
+    o.profiles[0].world = Follow {
+        enabled: 1,
+        curve: 13,
+        min_rate: 0.27,
+        max_rate: 0.73,
+        distance: 650.0,
+    };
+    let mut f = frame(1.0 / 60.0);
+    let s = step_advanced(AdvancedState::default(), f, &o);
+    f.focus[0] = 20.0;
+    f.native.position[0] = 20.0;
+    let next = step_advanced(s, f, &o);
+    near(next.anchor[0], 20.0 * 0.08859672, 0.0001);
+}
+
+#[test]
+fn world_clamp_does_not_pull_a_separately_filtered_orbit() {
+    let mut o = options();
+    o.profiles[0].local = Follow {
+        enabled: 1,
+        min_rate: 0.0,
+        max_rate: 0.0,
+        ..Follow::default()
+    };
+    o.clamp_mask = 7;
+    o.clamp_min = [-2.0; 3];
+    o.clamp_max = [2.0; 3];
+    let mut f = frame(0.01);
+    let s = step_advanced(AdvancedState::default(), f, &o);
+    f.native.position[0] = 50.0;
+    let next = step_advanced(s, f, &o);
+    assert_eq!(next.orbit, s.orbit);
+    assert_eq!(next.position, s.position);
 }

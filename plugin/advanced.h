@@ -62,7 +62,7 @@ static_assert(std::is_standard_layout_v<AdvancedState> && std::is_trivially_copy
 // Failures leave output unchanged. All input/output regions must be disjoint.
 // Initialize state with zeroes; native.reset forces a fresh result. Disabled or
 // masked groups return success with initialized=0 and original native position.
-// Run engine collision LAST; feed its correction into next.orbit and position.
+// Run engine collision LAST on a display copy; preserve pre-collision history.
 extern "C" std::uint32_t cc_step_advanced(const AdvancedState*, const AdvancedFrame*, const ThirdOptions*, AdvancedState*);
 extern "C" std::uint32_t cc_advanced_defaults(ThirdOptions*);
 extern "C" std::uint32_t cc_advanced_validate(const ThirdOptions*);

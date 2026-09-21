@@ -311,11 +311,11 @@ fn response(follow: Follow, distance: f32, dt: f32) -> f32 {
     if dt == 0.0 {
         return 0.0;
     }
-    let rate = mix(
-        follow.min_rate,
-        follow.max_rate,
-        advanced_curve(follow.curve, distance / follow.distance),
-    );
+    // SmoothCam's public response convention: remap distance into the rate
+    // interval first, then evaluate the easing curve (not the reverse).
+    let scalar =
+        ((1.0 - (follow.distance - distance)).max(1e-12) / follow.distance).clamp(0.0, 1.0);
+    let rate = advanced_curve(follow.curve, mix(follow.min_rate, follow.max_rate, scalar));
     if rate == 1.0 {
         return 1.0;
     }
@@ -484,7 +484,13 @@ fn step_validated(
     };
     let desired = std::array::from_fn(|i| frame.focus[i] + orbit_target[i] + offset[i]);
     state.position = std::array::from_fn(|i| state.anchor[i] + state.orbit[i] + offset[i]);
-    let lag = subtract(state.position, desired);
+    // With separate local following, clamps constrain world-anchor lag only.
+    let separate = p.local.enabled != 0;
+    let lag = if separate {
+        subtract(state.anchor, frame.focus)
+    } else {
+        subtract(state.position, desired)
+    };
     let local_lag = rotate([q[0], -q[1], -q[2], -q[3]], lag);
     let mut limited = local_lag;
     for i in 0..3 {
@@ -500,10 +506,13 @@ fn step_validated(
     if limited != local_lag {
         let corrected = rotate(q, limited);
         for i in 0..3 {
-            // Constrain the relative camera, preserving the player-follow anchor.
             let correction = corrected[i] - lag[i];
-            state.orbit[i] += correction;
-            state.position[i] = desired[i] + corrected[i];
+            if separate {
+                state.anchor[i] += correction;
+            } else {
+                state.orbit[i] += correction;
+            }
+            state.position[i] += correction;
         }
     }
     state.native = frame.native.position;

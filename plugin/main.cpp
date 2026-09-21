@@ -1,3 +1,4 @@
+#include "collision_output.h"
 #include <RE/Skyrim.h>
 #include <SKSE/SKSE.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -622,14 +623,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         state = {}; advancedState = {}; return;
     }
     const float corrected[]{position.x, position.y, position.z};
-    for (unsigned i = 0; i < 3; ++i) {
-        const float delta = corrected[i] - candidate.position[i];
-        if (advanced) {
-            advancedCandidate.orbit[i] += delta;
-            advancedCandidate.position[i] = corrected[i];
-        } else candidate.base[i] += delta;
-        candidate.position[i] = corrected[i];
-    }
+    ApplyCollisionOutput(candidate, advanced, corrected);
     stamp = probe.Mark();
     auto nativeState = self->translation;
     auto local = root->local.translate;
