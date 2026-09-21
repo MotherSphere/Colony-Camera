@@ -18,6 +18,9 @@
 namespace {
 using Clock = std::chrono::steady_clock;
 CameraConfig config = cc_defaults();
+// Temporary A/B build: retain stored preset data, but use the pre-0.3.2
+// native-relative geometry for both the bridge and the Rust solver.
+ThirdOptions geometryOptions = config.third;
 CameraState state{};
 AdvancedState advancedState{};
 CameraState povOrigin{};
@@ -208,6 +211,9 @@ void ApplyConfig(const CameraConfig& replacement) {
     if (appliedTo) RestoreNative(appliedTo.get());
     RestoreCamera(true);
     config = replacement;
+    geometryOptions = config.third;
+    geometryOptions.preset_geometry = 0;
+    spdlog::info("Geometry diagnostic: native-relative (0.3.1); stored preset distance/zoom/geometry unchanged but inactive");
     framework_menu::Sync(config);
     for (int i = 0; i < 3; ++i) bindings[i].store(config.keys[i]);
     menuBinding = config.menu_key;
@@ -558,7 +564,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     } else if (advancedSelected) {
         auto focus = player->GetPosition();
         float presetZoom = 0.0f;
-        if (config.third.preset_geometry) {
+        if (geometryOptions.preset_geometry) {
             // Cache only within this loaded body. Perspective/menu resets refresh
             // the landmark after any first-person body lease was restored.
             static RE::NiPointer<RE::NiAVObject> focusRoot, focusNode;
@@ -590,10 +596,10 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         AdvancedFrame input{frame, {focus.x, focus.y, focus.z}, group, stance, pitch,
             self->posOffsetActual.x, self->posOffsetActual.z, leftShoulder ? 1u : 0u, presetZoom};
         if (!reportedFrame) spdlog::info("Advanced geometry: preset={} group={} stance={} focus=({:.2f},{:.2f},{:.2f}) zoom={:.3f} base={:.2f} scale={:.2f}",
-            config.third.preset_geometry, group, stance, focus.x, focus.y, focus.z,
+            geometryOptions.preset_geometry, group, stance, focus.x, focus.y, focus.z,
             presetZoom, config.third.min_distance, config.third.zoom_scale);
         stamp = probe.Mark();
-        const auto result = cc_step_advanced(&advancedState, &input, &config.third, &advancedCandidate);
+        const auto result = cc_step_advanced(&advancedState, &input, &geometryOptions, &advancedCandidate);
         probe.result.math = probe.Elapsed(stamp);
         if (result) { state = {}; advancedState = {}; return; }
         advanced = advancedCandidate.initialized != 0;
