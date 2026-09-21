@@ -9,6 +9,7 @@
 #include "scene.h"
 #include "timing.h"
 #include "pov_transition.h"
+#include "camera_space.h"
 #include "first_person.h"
 #include "settings_menu.h"
 #include "framework_menu.h"
@@ -61,6 +62,7 @@ bool reportedBodyAlignment = false;
 bool reportedViewMotion = false;
 RE::BSTSmartPointer<RE::ThirdPersonState> appliedTo;
 RE::TESObjectCELL* lastCell = nullptr;
+RE::TESWorldSpace* lastWorld = nullptr;
 Clock::time_point lastTick{};
 RE::Setting* shoulderSettings[2]{};
 RE::Setting* minimumZoomSetting = nullptr;
@@ -478,7 +480,7 @@ void Begin(RE::ThirdPersonState* self) {
     RestorePosition();
     RestoreFov(); bodyRenderer.Reset(); coordinator = {};
     state = {}; advancedState = {};
-    lastCell = nullptr;
+    lastCell = nullptr; lastWorld = nullptr;
     lastTick = {};
     originalBegin(self);
 }
@@ -534,9 +536,11 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     const float dt = lastTick == Clock::time_point{} ? 0.0f : std::chrono::duration<float>(now-lastTick).count();
     lastTick = now;
     auto* cell = player->GetParentCell();
-    const bool reset = resetRequested.exchange(false) || before.reset || after.reset || lastCell != cell;
+    auto* worldSpace = cell && !cell->IsInteriorCell() ? cell->GetRuntimeData().worldSpace : nullptr;
+    const bool reset = resetRequested.exchange(false) || before.reset || after.reset
+        || !camera::SameSpace(lastCell, lastWorld, cell, worldSpace);
     if (reset || !state.initialized || !self->stateNotActive) { povOrigin = {}; povStarted = {}; }
-    lastCell = cell;
+    lastCell = cell; lastWorld = worldSpace;
     const auto stance = config.third.enabled ? ThirdStance(player) : 0u;
     const auto group = config.third.enabled ? ThirdGroup(player, camera, stance) : 0u;
     const bool advancedSelected = config.third.enabled && (config.third.group_mask & (1u << group));
