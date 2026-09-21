@@ -239,10 +239,10 @@ fn pointer_abi_has_expected_layout_and_rejects_overlap_without_writes() {
     use std::mem::{align_of, offset_of, size_of};
     assert_eq!(
         (size_of::<ThirdOptions>(), align_of::<ThirdOptions>()),
-        (4352, 4)
+        (4368, 4)
     );
     assert_eq!(size_of::<AdvancedFrame>(), 80);
-    assert_eq!(size_of::<AdvancedState>(), 128);
+    assert_eq!(size_of::<AdvancedState>(), 572);
     assert_eq!(offset_of!(AdvancedState, elapsed), 116);
     let o = options();
     let f = frame(0.01);
@@ -693,4 +693,86 @@ fn world_clamp_does_not_pull_a_separately_filtered_orbit() {
     let next = step_advanced(s, f, &o);
     assert_eq!(next.orbit, s.orbit);
     assert_eq!(next.position, s.position);
+}
+
+#[test]
+fn follow_transition_blends_responses_across_curves_and_interruptions() {
+    let mut o = options();
+    o.profiles[0].world = Follow {
+        enabled: 1,
+        curve: 0,
+        min_rate: 0.1,
+        max_rate: 0.1,
+        ..Follow::default()
+    };
+    o.profiles[4].world = Follow {
+        curve: 1,
+        min_rate: 0.8,
+        max_rate: 0.8,
+        ..o.profiles[0].world
+    };
+    let mut json = serde_json::to_value(o).unwrap();
+    json["follow_duration"] = serde_json::json!([1.0, 2.0]);
+    json["follow_curve"] = serde_json::json!([0, 0]);
+    let o: ThirdOptions = serde_json::from_value(json).unwrap();
+    let mut f = frame(0.0);
+    let s = step_advanced(AdvancedState::default(), f, &o);
+    f.group = 1;
+    let mut switched = step_advanced(s, f, &o);
+    // Halfway, evaluated rates blend: .1 -> .8^2 gives .37, not (.45)^2.
+    f.native.dt = 0.25;
+    switched = step_advanced(switched, f, &o);
+    switched = step_advanced(switched, f, &o);
+    f.native.dt = 0.0;
+    f.group = 0; // interrupt midway; it must retain the mixture, not snap to .1
+    let interrupted = step_advanced(switched, f, &o);
+    f.native.dt = 1.0 / 60.0;
+    f.focus[0] = 10.0;
+    f.native.position[0] = 10.0;
+    let next = step_advanced(interrupted, f, &o);
+    // The old transition advances too: (.1 + .54 * (0.5+dt)) mixed toward .1.
+    let rate = (0.1 + 0.54 * (0.5 + f.native.dt)) * (1.0 - f.native.dt) + 0.1 * f.native.dt;
+    near(next.anchor[0], 10.0 * rate, 0.0002);
+    let mut reset = f;
+    reset.native.reset = 1;
+    assert_eq!(step_advanced(next, reset, &o).anchor, f.focus);
+}
+
+#[test]
+fn response_transition_clocks_are_independent_bounded_and_validated() {
+    let mut o = options();
+    o.follow_duration = [0.5, 1.0];
+    o.follow_curve = [13, 3];
+    o.profiles[0].world = Follow::default();
+    o.profiles[0].local = Follow::default();
+    o.profiles[4] = o.profiles[0];
+    o.profiles[4].world.curve = 13;
+    o.profiles[4].local.curve = 3;
+    let mut f = frame(0.0);
+    let mut s = step_advanced(AdvancedState::default(), f, &o);
+    f.group = 1;
+    s = step_advanced(s, f, &o);
+    f.native.dt = 0.25;
+    for _ in 0..2 {
+        s = step_advanced(s, f, &o);
+    }
+    assert_eq!(s.following[0].count, 1);
+    assert_eq!(s.following[1].count, 2);
+    for _ in 0..2 {
+        s = step_advanced(s, f, &o);
+    }
+    assert_eq!(s.following[1].count, 1);
+    f.native.dt = 0.001;
+    for group in (0..100).map(|i| i % 2) {
+        f.group = group;
+        s = step_advanced(s, f, &o);
+        assert_eq!(s.initialized, 1);
+        assert!((1..=6).contains(&s.following[0].count));
+        assert!(s.position.iter().all(|x| x.is_finite()));
+    }
+    s.following[0].count = u32::MAX;
+    assert_eq!(step_advanced(s, f, &o).following[0].count, 1);
+    o.follow_duration[1] = f32::NAN;
+    assert!(!o.valid());
+    assert_eq!(step_advanced(s, f, &o).initialized, 0);
 }

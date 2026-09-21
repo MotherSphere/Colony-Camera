@@ -9,7 +9,7 @@
 struct Follow {
     std::uint32_t enabled, curve;
     float min_rate, max_rate; // response fraction at 60 Hz; 0 holds, 1 snaps
-    float distance; // distance at which max_rate is reached
+    float distance; // preset distance-remapping reference
 };
 struct AdvancedProfile {
     float offset[3]; // absolute camera-local side/up; additive camera-local depth
@@ -31,6 +31,8 @@ struct ThirdOptions {
     std::uint32_t mirror_clamp;
     std::uint32_t preset_geometry; // 1: preset boom distance and world-vertical height
     float min_distance, zoom_scale;
+    float follow_duration[2];
+    std::uint32_t follow_curve[2];
 };
 struct AdvancedFrame {
     CameraFrame native; // unmodified engine camera, before plugin correction
@@ -41,6 +43,11 @@ struct AdvancedFrame {
     std::uint32_t shoulder_mirrored;
     float zoom; // max(0, targetZoomOffset - fMinCurrentZoom)
 };
+struct FollowTransition {
+    Follow values[6];
+    float elapsed[6];
+    std::uint32_t count;
+};
 struct AdvancedState {
     float position[3], native[3];
     std::uint32_t initialized; // 0: use legacy/native fallback, never publish position
@@ -48,10 +55,11 @@ struct AdvancedState {
     float offset[3], offset_from[3], offset_target[3];
     float fov, fov_delta, fov_from, fov_target;
     float elapsed[3]; // side/up, depth, FOV transition clocks
+    FollowTransition following[3];
 };
 static_assert(sizeof(Follow) == 20 && sizeof(AdvancedProfile) == 76);
-static_assert(sizeof(ThirdOptions) == 4352 && alignof(ThirdOptions) == 4);
-static_assert(sizeof(AdvancedFrame) == 80 && sizeof(AdvancedState) == 128);
+static_assert(sizeof(ThirdOptions) == 4368 && alignof(ThirdOptions) == 4);
+static_assert(sizeof(AdvancedFrame) == 80 && sizeof(AdvancedState) == 572);
 static_assert(offsetof(ThirdOptions, profiles) == 8 && offsetof(ThirdOptions, clamp_mask) == 4288);
 static_assert(offsetof(AdvancedFrame, focus) == 40 && offsetof(AdvancedFrame, shoulder_mirrored) == 72);
 static_assert(offsetof(AdvancedState, anchor) == 28 && offsetof(AdvancedState, elapsed) == 116);

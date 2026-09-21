@@ -85,6 +85,15 @@ Camera Colony configuration, not unsupported SmoothCam data.
 If you imported a preset with 0.3.0 or 0.3.1, import the original JSON again
 and choose **Apply draft and save** to use the corrected distance/height model.
 Older Colony settings retain their existing geometry until explicitly reimported.
+Reimport the original JSON to recover world/local response-transition durations
+and curves previously reported as unsupported. Older saved conversions default
+these durations to zero. Response curves now use the preset rate-remapping order;
+collision output no longer feeds back into advanced following history. With local
+following enabled, lag clamps constrain the world anchor before orbit offsets.
+Interrupted response transitions retain up to six responses without heap allocation.
+A seventh rapid retarget discards the oldest response mixture. Native collision,
+world/vertical distance coupling and interpolation enable/disable behavior still
+prevent exact SmoothCam parity. Test the same preset near walls and on stairs.
 The model and its base distance/zoom scale are editable on **Third Person**.
 An inactive interpolation override means the preset uses global follow settings;
 it does not disable the camera.

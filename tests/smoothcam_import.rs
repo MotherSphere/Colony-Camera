@@ -650,3 +650,19 @@ fn imported_distance_uses_zoom_scale_and_survives_save_reload() {
         assert!(import_smoothcam(&bad.to_string(), Config::default()).is_err());
     }
 }
+
+#[test]
+fn imports_follow_transition_durations_and_curves() {
+    let imported = colony_camera::smoothcam_import::import_smoothcam(
+        r#"{"globalInterpOverrideSmoothing":0.7,"localInterpOverrideSmoothing":1.2,"globalInterpOverrideMethod":13,"localInterpOverrideMethod":3}"#,
+        colony_camera::Config::default()).unwrap();
+    let value = serde_json::to_value(imported.config.third).unwrap();
+    assert_eq!(
+        value["follow_duration"],
+        serde_json::json!([0.7_f32, 1.2_f32])
+    );
+    assert_eq!(value["follow_curve"], serde_json::json!([13, 3]));
+    assert!(!imported
+        .report
+        .contains("Unsupported: $.globalInterpOverrideSmoothing"));
+}

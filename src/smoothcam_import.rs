@@ -510,8 +510,6 @@ fn unsupported(r: &mut Object<'_, '_>) -> Result<(), String> {
         ("maxArrowPredictionRange", 10000.0, 0.0, 1e8),
         ("customZOffset", 0.0, -1000.0, 1000.0),
         ("globalInterpDisableSmoothing", 2.0, 0.0, 60.0),
-        ("globalInterpOverrideSmoothing", 1.5, 0.0, 60.0),
-        ("localInterpOverrideSmoothing", 2.0, 0.0, 60.0),
     ] {
         r.number(key, default, min, max)?;
     }
@@ -524,13 +522,7 @@ fn unsupported(r: &mut Object<'_, '_>) -> Result<(), String> {
     ] {
         r.integer(key, -1, -1, 281)?;
     }
-    for key in [
-        "globalInterpDisableMehtod",
-        "globalInterpOverrideMethod",
-        "localInterpOverrideMethod",
-    ] {
-        r.curve(key, 0)?;
-    }
+    r.curve("globalInterpDisableMehtod", 0)?;
     r.integer("worldCrosshairType", 1, 0, 2)?;
     r.integer("dialogueMode", 1, 0, 3)?;
     let mut color = r.object("arrowArcColor", UNSUPPORTED)?;
@@ -588,6 +580,14 @@ fn parse_options(r: &mut Object<'_, '_>) -> Result<ThirdOptions, String> {
         enabled: enabled as u32,
         group_mask: 127,
         preset_geometry: 1,
+        follow_duration: [
+            r.number("globalInterpOverrideSmoothing", 1.5, 0.0, 60.0)?,
+            r.number("localInterpOverrideSmoothing", 2.0, 0.0, 60.0)?,
+        ],
+        follow_curve: [
+            r.curve("globalInterpOverrideMethod", 0)?,
+            r.curve("localInterpOverrideMethod", 0)?,
+        ],
         min_distance: r.number("minCameraFollowDistance", 80.0, 0.0, 10_000.0)?,
         zoom_scale: r.number("zoomMul", 500.0, 0.0, 10_000.0)?,
         offset_curve: r.curve("offsetScalar", 15)?,
@@ -671,7 +671,7 @@ pub fn import_smoothcam(text: &str, current: Config) -> Result<ImportResult, Str
         "SmoothCam import: approximate behavioral compatibility, not exact parity.\n\
          Supported: camera offsets, FOV, easing, follow settings, transitions, clamps and pitch zoom.\n\
          Imported geometry uses preset distance/zoom and world-vertical height. The host anchor follows Camera3rd or the head; native-relative Colony settings stay unchanged; custom follow-bone priorities are unsupported.\n\
-         World/local/vertical follow and clamping are approximations; zoom-scroll timing and interpolation-override transitions can differ.\n\
+         World/local/vertical follow and clamping are approximations; zoom-scroll timing and interpolation enable/disable transitions can differ. Response override durations and curves are imported.\n\
          Pitch direction and bowAim/sneaking stance selection can differ from the source camera.\n\
          Missing fields use public JSON construction defaults (not the reset-menu preset or previous Colony values).\n\
          Special states sitting, horseback, dragon, vampireLord, werewolf, userDefined and vanity are preserved but unavailable; only groups 0..6 run.\n\

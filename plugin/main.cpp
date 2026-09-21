@@ -200,6 +200,9 @@ void ApplyFov(RE::PlayerCamera* camera, RE::NiCamera* rendered, float native, fl
 }
 void ApplyConfig(const CameraConfig& replacement) {
     if (cc_validate_config(&replacement)) return;
+    spdlog::info("Preset follow fix: pre-collision history; world/local transitions={}s/{}s curves={}/{}",
+        replacement.third.follow_duration[0], replacement.third.follow_duration[1],
+        replacement.third.follow_curve[0], replacement.third.follow_curve[1]);
     bodyRenderer.Reset();
     ResetFirstView();
     bodyTraces = {};

@@ -236,12 +236,12 @@ inline void __stdcall Profiles() {
 inline void FollowControls(const char* label, Follow& follow) {
     if (!ImGuiMCP::BeginTabItem(label)) return;
     Toggle("Enable smoothing", follow.enabled);
-    Help("Disabled follows immediately. Rates are response fractions at 60 Hz: zero holds and one snaps.");
+    Help("Disabled follows immediately. Rates are evaluated through the response curve at 60 Hz: zero holds and one snaps.");
     if (Form(label)) {
         Curve("Response curve", follow.curve);
-        Slider("Minimum response", follow.min_rate, 0, follow.max_rate, "Response to small following errors. Larger values catch up faster.");
-        Slider("Maximum response", follow.max_rate, follow.min_rate, 1, "Response at the maximum smoothing distance. Larger values catch up faster.");
-        Slider("Smoothing distance", follow.distance, 0.001f, 100000, "Following error at which the maximum response is reached, in game units. Ctrl-click to enter an exact value.");
+        Slider("Minimum response", follow.min_rate, 0, follow.max_rate, "Minimum input to the selected response curve. Larger values catch up faster.");
+        Slider("Maximum response", follow.max_rate, follow.min_rate, 1, "Maximum input to the selected response curve. Larger values catch up faster.");
+        Slider("Smoothing distance", follow.distance, 0.001f, 100000, "Reference distance used by preset response remapping, in game units. Ctrl-click to enter an exact value.");
         ImGuiMCP::EndTable();
     }
     ImGuiMCP::EndTabItem();
@@ -257,6 +257,14 @@ inline void __stdcall Following() {
         FollowControls("Rotation / orbit", p.local);
         FollowControls("Vertical", p.vertical);
         ImGuiMCP::EndTabBar();
+    }
+    if (ImGuiMCP::CollapsingHeader("Follow transitions - all profiles") && Form("follow-transitions")) {
+        auto& third = draft.third;
+        Slider("Movement / vertical duration", third.follow_duration[0], 0, 60, "Seconds to blend response settings when movement or weapon stance changes. Zero switches immediately.");
+        Curve("Movement / vertical curve", third.follow_curve[0]);
+        Slider("Rotation / orbit duration", third.follow_duration[1], 0, 60, "Seconds to blend local response settings. Independent of offset transitions.");
+        Curve("Rotation / orbit curve", third.follow_curve[1]);
+        ImGuiMCP::EndTable();
     }
 }
 inline void __stdcall Offsets() {

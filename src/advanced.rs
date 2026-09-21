@@ -107,6 +107,12 @@ pub struct ThirdOptions {
     pub min_distance: f32,
     #[serde(default)]
     pub zoom_scale: f32,
+    /// World/vertical and local response-transition duration and easing.
+    /// Older saved settings retain immediate switching until reimported.
+    #[serde(default)]
+    pub follow_duration: [f32; 2],
+    #[serde(default)]
+    pub follow_curve: [u32; 2],
 }
 // Serde implements fixed arrays only through length 32. The sequence conversion
 // is confined to configuration I/O; the per-frame ABI never allocates.
@@ -149,6 +155,8 @@ impl Default for ThirdOptions {
             preset_geometry: 0,
             min_distance: 0.0,
             zoom_scale: 0.0,
+            follow_duration: [0.0; 2],
+            follow_curve: [0; 2],
         }
     }
 }
@@ -166,6 +174,8 @@ impl ThirdOptions {
         ]
         .iter()
         .all(|x| *x <= 1)
+            && self.follow_duration.iter().all(|x| bounded(*x, 0.0, 60.0))
+            && self.follow_curve.iter().all(|x| *x < 22)
             && bounded(self.min_distance, 0.0, 10_000.0)
             && bounded(self.zoom_scale, 0.0, 10_000.0)
             && self.group_mask & !0x3fff == 0
@@ -244,10 +254,12 @@ pub struct AdvancedState {
     pub fov_target: f32,
     /// Elapsed seconds: side/up, depth, FOV.
     pub elapsed: [f32; 3],
+    pub following: [FollowTransition; 3],
 }
 impl AdvancedState {
     fn valid(&self) -> bool {
         self.initialized == 1
+            && self.following.iter().all(FollowTransition::valid)
             && self
                 .position
                 .iter()
@@ -267,6 +279,70 @@ impl AdvancedState {
                 .all(|x| bounded(*x, -60.0, 60.0))
             && bounded(self.fov, 1.0, 179.0)
             && self.elapsed.iter().all(|x| bounded(*x, 0.0, 10.0))
+    }
+}
+/// Bounded response-expression history. Interrupted transitions keep evaluating
+/// their previous mixtures at the current distance, including different curves.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FollowTransition {
+    pub values: [Follow; 6],
+    pub elapsed: [f32; 6],
+    pub count: u32,
+}
+impl FollowTransition {
+    fn valid(&self) -> bool {
+        (1..=6).contains(&self.count)
+            && self.values[..self.count as usize].iter().all(Follow::valid)
+            && self.elapsed[..self.count as usize]
+                .iter()
+                .all(|x| bounded(*x, 0.0, 60.0))
+    }
+    fn update(&mut self, target: Follow, dt: f32, duration: f32, reset: bool) {
+        if reset || self.count == 0 || duration == 0.0 {
+            self.values[0] = target;
+            self.elapsed[0] = duration;
+            self.count = 1;
+            return;
+        }
+        let mut count = self.count as usize;
+        for elapsed in &mut self.elapsed[..count] {
+            *elapsed = (*elapsed + dt).min(duration);
+        }
+        if self.elapsed[count - 1] >= duration {
+            self.values[0] = self.values[count - 1];
+            self.elapsed[0] = duration;
+            count = 1;
+        }
+        if self.values[count - 1] != target {
+            if count == 6 {
+                // ponytail: six active responses bound per-frame work; only the
+                // oldest mixture is discarded on a seventh rapid retarget.
+                self.values.copy_within(1..6, 0);
+                self.elapsed.copy_within(1..6, 0);
+                count -= 1;
+            }
+            self.values[count] = target;
+            self.elapsed[count] = 0.0;
+            count += 1;
+        }
+        self.count = count as u32;
+    }
+    fn response(&self, distance: f32, dt: f32, duration: f32, curve: u32) -> f32 {
+        let mut rate = response_rate(self.values[0], distance);
+        for i in 1..self.count as usize {
+            let progress = if duration == 0.0 {
+                1.0
+            } else {
+                self.elapsed[i] / duration
+            };
+            rate = mix(
+                rate,
+                response_rate(self.values[i], distance),
+                advanced_curve(curve, progress),
+            );
+        }
+        timed_response(rate, dt)
     }
 }
 /// Standard monotonic easing functions. IDs match the public preset enum; no
@@ -304,32 +380,46 @@ fn mix(a: f32, b: f32, fraction: f32) -> f32 {
     }
     (a + (b - a) * fraction).clamp(a.min(b), a.max(b))
 }
-fn response(follow: Follow, distance: f32, dt: f32) -> f32 {
+fn response_rate(follow: Follow, distance: f32) -> f32 {
     if follow.enabled == 0 {
         return 1.0;
     }
+    // Public preset convention: remap into the rate interval before easing.
+    let scalar =
+        ((1.0 - (follow.distance - distance)).max(1e-12) / follow.distance).clamp(0.0, 1.0);
+    advanced_curve(follow.curve, mix(follow.min_rate, follow.max_rate, scalar))
+}
+fn timed_response(rate: f32, dt: f32) -> f32 {
     if dt == 0.0 {
         return 0.0;
     }
-    // SmoothCam's public response convention: remap distance into the rate
-    // interval first, then evaluate the easing curve (not the reverse).
-    let scalar =
-        ((1.0 - (follow.distance - distance)).max(1e-12) / follow.distance).clamp(0.0, 1.0);
-    let rate = advanced_curve(follow.curve, mix(follow.min_rate, follow.max_rate, scalar));
     if rate == 1.0 {
         return 1.0;
     }
-    // Convert the reference-frame response to elapsed time without cancellation.
     -((dt * 60.0) * (-rate).ln_1p()).exp_m1()
 }
-fn follow_anchor(mut current: [f32; 3], target: [f32; 3], p: AdvancedProfile, dt: f32) -> [f32; 3] {
-    // Bounded substeps limit distance-dependent response error at low frame rates.
-    // Constant-rate response remains an exact exponential at any timestep.
+fn follow_anchor(
+    mut current: [f32; 3],
+    target: [f32; 3],
+    follows: &[FollowTransition; 3],
+    o: &ThirdOptions,
+    dt: f32,
+) -> [f32; 3] {
     let count = (dt * 240.0).ceil().max(1.0) as u32;
     for _ in 0..count {
         let delta = subtract(target, current);
-        let xy = response(p.world, delta[0].hypot(delta[1]), dt / count as f32);
-        let z = response(p.vertical, delta[2].abs(), dt / count as f32);
+        let xy = follows[0].response(
+            delta[0].hypot(delta[1]),
+            dt / count as f32,
+            o.follow_duration[0],
+            o.follow_curve[0],
+        );
+        let z = follows[2].response(
+            delta[2].abs(),
+            dt / count as f32,
+            o.follow_duration[0],
+            o.follow_curve[0],
+        );
         current = [
             mix(current[0], target[0], xy),
             mix(current[1], target[1], xy),
@@ -338,10 +428,21 @@ fn follow_anchor(mut current: [f32; 3], target: [f32; 3], p: AdvancedProfile, dt
     }
     current
 }
-fn follow_orbit(mut current: [f32; 3], target: [f32; 3], follow: Follow, dt: f32) -> [f32; 3] {
+fn follow_orbit(
+    mut current: [f32; 3],
+    target: [f32; 3],
+    follow: &FollowTransition,
+    o: &ThirdOptions,
+    dt: f32,
+) -> [f32; 3] {
     let count = (dt * 240.0).ceil().max(1.0) as u32;
     for _ in 0..count {
-        let alpha = response(follow, length(subtract(target, current)), dt / count as f32);
+        let alpha = follow.response(
+            length(subtract(target, current)),
+            dt / count as f32,
+            o.follow_duration[1],
+            o.follow_curve[1],
+        );
         current = std::array::from_fn(|i| mix(current[i], target[i], alpha));
     }
     current
@@ -428,6 +529,14 @@ fn step_validated(
         || frame.native.dt > 0.25
         || length(subtract(frame.focus, state.focus)) > 1000.0
         || length(subtract(frame.native.position, state.native)) > 1000.0;
+    for (i, target_follow) in [p.world, p.local, p.vertical].into_iter().enumerate() {
+        state.following[i].update(
+            target_follow,
+            frame.native.dt,
+            o.follow_duration[usize::from(i == 1)],
+            reset,
+        );
+    }
     if reset {
         state.anchor = frame.focus;
         state.orbit = orbit_target;
@@ -468,8 +577,8 @@ fn step_validated(
             )
         });
         state.fov_delta = mix(state.fov_from, state.fov_target, fov);
-        state.anchor = follow_anchor(state.anchor, frame.focus, p, dt);
-        state.orbit = follow_orbit(state.orbit, orbit_target, p.local, dt);
+        state.anchor = follow_anchor(state.anchor, frame.focus, &state.following, o, dt);
+        state.orbit = follow_orbit(state.orbit, orbit_target, &state.following[1], o, dt);
     }
     let mut offset = state.offset;
     if o.pitch_after == 1 {

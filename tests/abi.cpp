@@ -129,6 +129,16 @@ int main() {
     advancedFrame.focus[2] = 120; advancedFrame.zoom = 2;
     assert(cc_step_advanced(&initial, &advancedFrame, &options, &advanced) == 0);
     assert(advanced.position[0] == 28 && advanced.position[1] == -150 && advanced.position[2] == 170);
+    options.follow_duration[0] = 1.25f;
+    options.follow_duration[1] = 2.5f;
+    options.follow_curve[0] = 13;
+    options.follow_curve[1] = 3;
+    assert(cc_step_advanced(&initial, &advancedFrame, &options, &advanced) == 0);
+    assert(advanced.following[0].count == 1 && advanced.following[1].count == 1);
+    assert(advanced.following[0].elapsed[0] == 1.25f && advanced.following[1].elapsed[0] == 2.5f);
+    options.follow_curve[1] = 22;
+    assert(cc_advanced_validate(&options) == 3);
+    options.follow_curve[1] = 3;
     options.profiles[10].world.curve = 99;
     const auto intact = advanced;
     assert(cc_step_advanced(&initial, &advancedFrame, &options, &advanced) == 3);

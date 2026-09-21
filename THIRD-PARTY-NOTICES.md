@@ -1,7 +1,12 @@
 # Third-party notices
 
 Colony Camera's original code is GPL-3.0-or-later; see LICENSE.
-No SmoothCam implementation, presets, UI or assets are included.
+SmoothCam by mwilsnd and contributors, revision
+66f3960ec4de2b28af5e863c794a3924e6a2dfdd, is the behavioral reference for preset
+response remapping, interrupted response transitions and pre-collision history.
+https://github.com/mwilsnd/SkyrimSE-SmoothCam/tree/66f3960ec4de2b28af5e863c794a3924e6a2dfdd
+These behaviors are implemented in this project's Rust value solver; no upstream
+source files, binary, presets, UI or assets are bundled.
 
 The no-headbob body-placement algorithm in src/first_person.rs is adapted from
 ImprovedCameraSE-NG, ArranzCNL and contributors, revision
