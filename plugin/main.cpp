@@ -20,6 +20,32 @@ using Clock = std::chrono::steady_clock;
 CameraConfig config = cc_defaults();
 CameraState state{};
 AdvancedState advancedState{};
+// Temporary diagnostic: retain only the latest 600 frames, with no log I/O
+// during movement. Apply/toggle flushes the window after reproduction.
+struct MotionSample {
+    RE::NiPoint3 player{}, native{}, focus{}, goal{}, collision{}, published{}, finalView{};
+    float dt{}, zoom{};
+    unsigned group{}, stance{};
+    bool reset{}, restored{}, finalSeen{};
+};
+std::array<MotionSample, 600> motionSamples{};
+std::size_t motionCount{};
+bool motionPending{};
+void FlushMotion() {
+    const auto count = (std::min)(motionCount, motionSamples.size());
+    if (!count) return;
+    spdlog::info("MOTION window={} total={} diagnostic=third-person-jitter", count, motionCount);
+    for (std::size_t i = motionCount-count; i < motionCount; ++i) {
+        const auto& m = motionSamples[i % motionSamples.size()];
+        spdlog::info("MOTION i={} dt={} group={} stance={} reset={} restored={} zoom={} player=({},{},{}) native=({},{},{}) focus=({},{},{}) goal=({},{},{}) collision=({},{},{}) published=({},{},{}) final_seen={} final=({},{},{})",
+            i, m.dt, m.group, m.stance, m.reset, m.restored, m.zoom,
+            m.player.x,m.player.y,m.player.z, m.native.x,m.native.y,m.native.z,
+            m.focus.x,m.focus.y,m.focus.z, m.goal.x,m.goal.y,m.goal.z,
+            m.collision.x,m.collision.y,m.collision.z, m.published.x,m.published.y,m.published.z,
+            m.finalSeen, m.finalView.x,m.finalView.y,m.finalView.z);
+    }
+    motionCount = 0; motionPending = false;
+}
 CameraState povOrigin{};
 float povStartZoom = 0.0f;
 Clock::time_point povStarted{};
@@ -199,6 +225,7 @@ void ApplyFov(RE::PlayerCamera* camera, RE::NiCamera* rendered, float native, fl
 }
 void ApplyConfig(const CameraConfig& replacement) {
     if (cc_validate_config(&replacement)) return;
+    FlushMotion();
     bodyRenderer.Reset();
     ResetFirstView();
     bodyTraces = {};
@@ -471,6 +498,8 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     const auto restoreStamp = probe.Mark();
     // Feed the native solver its own previous result, not our filtered output.
     // Restore only an output that is still ours; never overwrite an engine/load change.
+    const bool nativeRestorable = appliedTo.get() == self && self->translation ==
+        RE::NiPoint3{state.position[0], state.position[1], state.position[2]};
     RestoreNative(self);
     RestorePosition(); RestoreFov();
     probe.result.scene = probe.Elapsed(restoreStamp);
@@ -616,6 +645,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     RE::NiPoint3 position{candidate.position[0], candidate.position[1], candidate.position[2]};
     // Native collision is deliberately last. Never interpolate away from its correction.
     stamp = probe.Mark();
+    const auto goalBeforeCollision = position;
     camera->CheckCameraCollision(position, true);
     probe.result.collision = probe.Elapsed(stamp);
     if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
@@ -657,6 +687,15 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     probe.result.scene += probe.Elapsed(stamp);
     probe.result.applied = true;
     appliedTo.reset(self);
+    auto& motion = motionSamples[motionCount++ % motionSamples.size()];
+    motion = {};
+    motion.player = player->GetPosition(); motion.native = native;
+    motion.focus = {advancedCandidate.focus[0], advancedCandidate.focus[1], advancedCandidate.focus[2]};
+    motion.goal = goalBeforeCollision; motion.collision = position;
+    motion.published = rendered->world.translate;
+    motion.dt = dt; motion.zoom = self->targetZoomOffset;
+    motion.group = group; motion.stance = stance; motion.reset = reset; motion.restored = nativeRestorable;
+    motionPending = true;
     const float dx = position.x-native.x, dy = position.y-native.y, dz = position.z-native.z;
     if (!reportedMovement && dx*dx+dy*dy+dz*dz > 0.01f) {
         spdlog::info("Camera displacement published: ({},{},{})", dx, dy, dz);
@@ -820,7 +859,16 @@ void CameraViewUpdate(RE::TESCamera* self) {
     ResetFirstView();
     probe.result.scene = probe.Elapsed(stamp);
     stamp = probe.Mark();
+    motionPending = false;
     originalCameraViewUpdate(self);
+    if (motionPending && motionCount && camera->currentState == beforeState) {
+        if (auto* finalCamera = RenderedCamera(camera)) {
+            auto& motion = motionSamples[(motionCount-1) % motionSamples.size()];
+            motion.finalView = finalCamera->world.translate;
+            motion.finalSeen = true;
+        }
+    }
+    motionPending = false;
     probe.result.native = probe.Elapsed(stamp);
     camera = RE::PlayerCamera::GetSingleton();
     // TESCamera can Begin a new POV without updating its view until the next
