@@ -45,6 +45,11 @@ verify navigation, Apply/save/reload and menu transitions in Skyrim.
 
 ## Advanced third person and SmoothCam presets
 
+When Skyrim requests first person from third person, the camera fades its
+positional and FOV corrections with native zoom progress. Preset minimum distance
+and following smoothing do not hold the camera back during this handoff. Skyrim
+still controls when the perspective changes; this does not add a separate timer.
+
 Enable **Advanced following** in the framework settings, or import a SmoothCam
 JSON file in **Presets**, inspect the conversion report and choose **Apply**.
 Existing INIs keep the legacy camera until you opt in. Enabling advanced following

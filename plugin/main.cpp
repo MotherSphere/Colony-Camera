@@ -8,6 +8,7 @@
 #include "runtime.h"
 #include "scene.h"
 #include "timing.h"
+#include "pov_transition.h"
 #include "first_person.h"
 #include "settings_menu.h"
 #include "framework_menu.h"
@@ -19,6 +20,9 @@ using Clock = std::chrono::steady_clock;
 CameraConfig config = cc_defaults();
 CameraState state{};
 AdvancedState advancedState{};
+CameraState povOrigin{};
+float povStartZoom = 0.0f;
+Clock::time_point povStarted{};
 std::atomic_uint commands{0};
 std::atomic_uint bindings[3]{66, 67, 68};
 std::atomic_uint menuBinding{65};
@@ -431,6 +435,9 @@ void RestoreNative(RE::ThirdPersonState* self) {
     appliedTo.reset();
 }
 void End(RE::ThirdPersonState* self) {
+    if (povStarted != Clock::time_point{}) spdlog::info("POV handoff ended after {:.3f}s; native zoom={:.4f}",
+        std::chrono::duration<float>(Clock::now()-povStarted).count(), self->currentZoomOffset);
+    povOrigin = {}; povStarted = {};
     RestoreNative(self);
     RestorePosition();
     RestoreFov(); coordinator = {};
@@ -439,6 +446,7 @@ void End(RE::ThirdPersonState* self) {
     originalEnd(self);
 }
 void Begin(RE::ThirdPersonState* self) {
+    povOrigin = {}; povStarted = {};
     RestoreNative(self);
     RestorePosition();
     RestoreFov(); bodyRenderer.Reset(); coordinator = {};
@@ -480,26 +488,32 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
         for (int i=0; i<2; ++i) { saved[i] = shoulderSettings[i]->data.f; shoulderSettings[i]->data.f = -saved[i]; }
     }
     auto stamp = probe.Mark();
+    const float zoomBefore = self->currentZoomOffset;
     originalUpdate(self, next);
     probe.result.native = probe.Elapsed(stamp);
     if (mirror) for (int i=0; i<2; ++i) if (shoulderSettings[i]->data.f == -saved[i]) shoulderSettings[i]->data.f = saved[i];
     if (!eligible || camera->currentState.get() != self || (next && next.get() != self)) {
+        if (povStarted != Clock::time_point{}) spdlog::info("POV handoff released after {:.3f}s; native zoom={:.4f}, next={}",
+            std::chrono::duration<float>(Clock::now()-povStarted).count(), self->currentZoomOffset,
+            next ? static_cast<unsigned>(next->id) : 0xffffffffu);
+        povOrigin = {}; povStarted = {};
         state = {}; advancedState = {}; lastTick = {}; return;
     }
     const auto after = Coordinate(self, self->IsInputEventHandlingEnabled());
-    if (after.owner != CC_THIRD_PERSON) { state = {}; advancedState = {}; lastTick = {}; return; }
+    if (after.owner != CC_THIRD_PERSON) { povOrigin = {}; povStarted = {}; state = {}; advancedState = {}; lastTick = {}; return; }
     const auto now = Clock::now();
     const float dt = lastTick == Clock::time_point{} ? 0.0f : std::chrono::duration<float>(now-lastTick).count();
     lastTick = now;
     auto* cell = player->GetParentCell();
     const bool reset = resetRequested.exchange(false) || before.reset || after.reset || lastCell != cell;
+    if (reset || !state.initialized || !self->stateNotActive) { povOrigin = {}; povStarted = {}; }
     lastCell = cell;
     const auto stance = config.third.enabled ? ThirdStance(player) : 0u;
     const auto group = config.third.enabled ? ThirdGroup(player, camera, stance) : 0u;
     const bool advancedSelected = config.third.enabled && (config.third.group_mask & (1u << group));
     auto profile = config.profiles[after.profile];
     if (leftShoulder && after.profile != CC_AIM) profile.offset[0] = -profile.offset[0];
-    if (!advancedSelected && (profile.half_life == 0.0f || profile.max_lag == 0.0f)
+    if (!self->stateNotActive && !advancedSelected && (profile.half_life == 0.0f || profile.max_lag == 0.0f)
         && profile.offset[0] == 0.0f && profile.offset[1] == 0.0f && profile.offset[2] == 0.0f
         && profile.zoom == 0.0f && profile.fov_offset == 0.0f
         && profile.offset_half_life == 0.0f && profile.zoom_half_life == 0.0f && profile.fov_half_life == 0.0f) {
@@ -531,7 +545,17 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
     CameraState candidate{};
     AdvancedState advancedCandidate{};
     bool advanced = false;
-    if (advancedSelected) {
+    if (self->stateNotActive) {
+        if (povStarted == Clock::time_point{}) {
+            povOrigin = reset ? CameraState{} : state;
+            povStartZoom = zoomBefore;
+            povStarted = now;
+            spdlog::info("POV handoff started; native zoom={:.4f}, preset={}", povStartZoom, advancedSelected);
+        }
+        const float minimumZoom = minimumZoomSetting ? minimumZoomSetting->GetFloat() : 0.2f;
+        candidate = pov::Blend(povOrigin, povStartZoom, self->currentZoomOffset, minimumZoom, frame);
+        advancedState = {};
+    } else if (advancedSelected) {
         auto focus = player->GetPosition();
         float presetZoom = 0.0f;
         if (config.third.preset_geometry) {
@@ -581,7 +605,7 @@ void Update(RE::ThirdPersonState* self, RE::BSTSmartPointer<RE::TESCameraState>&
             candidate.fov_delta = advancedCandidate.fov_delta;
         }
     }
-    if (!advanced) {
+    if (!advanced && !self->stateNotActive) {
         frame.reset |= advancedState.initialized;
         advancedState = {};
         stamp = probe.Mark();
